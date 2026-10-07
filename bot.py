@@ -10,7 +10,7 @@ CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
 
 STATE    = "state.json"
 INTERVAL = 30 * 60
-TEST     = True
+TEST = False
 
 JINA = "https://r.jina.ai/"
 BASE = "https://www.list.am"
