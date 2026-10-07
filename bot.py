@@ -10,6 +10,7 @@ CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
 
 STATE    = "state.json"
 INTERVAL = 20 * 60
+MAX_QUEUE = 150
 TEST = False
 
 JINA = "https://r.jina.ai/"
@@ -242,6 +243,11 @@ def main():
                 st["seen"].append(iid)
                 st["queue"].append(iid)
 
+    if len(st["queue"]) > MAX_QUEUE:
+        removed = len(st["queue"]) - MAX_QUEUE
+        st["queue"] = st["queue"][-MAX_QUEUE:]
+        print(f"очередь ограничена, удалено старых: {removed}")
+
     st["seen"] = st["seen"][-5000:]
     now = time.time()
     print("очередь:", len(st["queue"]))
@@ -250,13 +256,15 @@ def main():
         iid = st["queue"].pop(0)
         try:
             d = item_data(sess, iid)
-            if d["title"] and send(sess, d, iid, make_caption(sess, d)):
+            if not d["title"]:
+                print("объявление недоступно, пропускаем:", iid)
+            elif send(sess, d, iid, make_caption(sess, d)):
                 st["last_publish"] = now
             else:
-                st["queue"].insert(0, iid)
+                st["queue"].append(iid)
         except Exception as e:
             print("ошибка публикации:", e)
-            st["queue"].insert(0, iid)
+            st["queue"].append(iid)
 
     save(st)
 
