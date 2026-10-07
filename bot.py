@@ -10,8 +10,8 @@ TOKEN   = os.environ.get("TELEGRAM_TOKEN", "")
 CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
 
 STATE    = "state.json"
-INTERVAL = 40 * 60        # 40 րոպե հրապարակումների միջեւ
-TEST     = True           # փորձարկման ռեժիմ, վերջում կդարձնենք False
+INTERVAL = 40 * 60
+TEST     = True
 
 SECTIONS = {"4": "Электроника", "133": "Дом и сад",
             "27": "Детский мир", "16": "Транспорт"}
@@ -21,8 +21,36 @@ HDRS = {
     "User-Agent": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
                    "AppleWebKit/537.36 (KHTML, like Gecko) "
                    "Chrome/124.0.0.0 Safari/537.36"),
+    "Accept": ("text/html,application/xhtml+xml,application/xml;q=0.9,"
+               "image/avif,image/webp,*/*;q=0.8"),
     "Accept-Language": "ru-RU,ru;q=0.9,en;q=0.8",
+    "Accept-Encoding": "gzip, deflate",
+    "Upgrade-Insecure-Requests": "1",
+    "Referer": "https://www.list.am/ru/",
+    "Connection": "keep-alive",
 }
+
+def get_ids(sess):
+    ids = []
+    for cat in SECTIONS:
+        url = f"{BASE}/ru/category/{cat}"
+        try:
+            r = sess.get(url, headers=HDRS, timeout=40)
+            html = r.text
+            soup = BeautifulSoup(html, "html.parser")
+            links = soup.select("a[href*='/item/']")
+            title = soup.title.get_text(strip=True) if soup.title else "(нет)"
+            print(f"[{cat}] status={r.status_code} len={len(html)}")
+            print(f"[{cat}] title={title}")
+            print(f"[{cat}] item-ссылок={len(links)}")
+            print(f"[{cat}] начало HTML={html[:300]!r}")
+            for a in links:
+                m = re.search(r"/item/(\d+)", a.get("href", ""))
+                if m and m.group(1) not in ids:
+                    ids.append(m.group(1))
+        except Exception as e:
+            print(f"[{cat}] ошибка: {type(e).__name__}: {e}")
+    return ids
 
 def meta(soup, prop):
     tag = soup.find("meta", attrs={"property": prop})
@@ -30,25 +58,9 @@ def meta(soup, prop):
         return tag["content"].strip()
     return ""
 
-def get_ids(sess):
-    ids = []
-    for cat in SECTIONS:
-        try:
-            html = sess.get(f"{BASE}/ru/category/{cat}",
-                            headers=HDRS, timeout=30).text
-            soup = BeautifulSoup(html, "html.parser")
-            for a in soup.select("a[href*='/item/']"):
-                m = re.search(r"/item/(\d+)", a.get("href", ""))
-                if m and m.group(1) not in ids:
-                    ids.append(m.group(1))
-            print(f"[{cat}] {SECTIONS[cat]}: всего {len(ids)}")
-        except Exception as e:
-            print(f"[{cat}] ошибка: {e}")
-    return ids
-
 def item_data(sess, iid):
     url = f"{BASE}/ru/item/{iid}"
-    html = sess.get(url, headers=HDRS, timeout=30).text
+    html = sess.get(url, headers=HDRS, timeout=40).text
     soup = BeautifulSoup(html, "html.parser")
     text = soup.get_text("\n", strip=True)
 
@@ -58,13 +70,7 @@ def item_data(sess, iid):
         title = h1.get_text(strip=True) if h1 else ""
 
     photo = meta(soup, "og:image")
-
     desc = meta(soup, "og:description")
-    if not desc:
-        m = re.search(r"Описание\n(.+?)(?:\nПереведено|\nTranslated|\Z)",
-                      text, re.S)
-        if m:
-            desc = m.group(1).strip()
 
     price = ""
     m = re.search(r"([\d][\d\s.,]*)\s*(֏|\$|₽)", text)
