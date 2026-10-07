@@ -9,7 +9,7 @@ TOKEN   = os.environ.get("TELEGRAM_TOKEN", "")
 CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
 
 STATE    = "state.json"
-INTERVAL = 20 * 60
+INTERVAL = 18 * 60
 MAX_QUEUE = 150
 TEST = False
 
