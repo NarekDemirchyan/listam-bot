@@ -22,7 +22,12 @@ UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
       "AppleWebKit/537.36 (KHTML, like Gecko) "
       "Chrome/124.0.0.0 Safari/537.36")
 
-ARGS = ["--disable-blink-features=AutomationControlled", "--no-sandbox"]
+ARGS = [
+    "--disable-blink-features=AutomationControlled",
+    "--disable-dev-shm-usage",
+    "--no-sandbox",
+    "--disable-setuid-sandbox",
+]
 
 def open_page(page, url, tries=45):
     try:
@@ -121,10 +126,10 @@ def main():
 
     with sync_playwright() as p:
         try:
-            browser = p.chromium.launch(channel="chrome", headless=True, args=ARGS)
+            browser = p.chromium.launch(channel="chrome", headless=False, args=ARGS)
         except Exception as e:
             print("chrome не запустился:", e)
-            browser = p.chromium.launch(headless=True, args=ARGS)
+            browser = p.chromium.launch(headless=False, args=ARGS)
 
         ctx = browser.new_context(user_agent=UA, locale="ru-RU",
                                   viewport={"width": 1366, "height": 900})
