@@ -1,4 +1,4 @@
-name: listam-bot
+name: listam bot
 
 on:
   schedule:
@@ -11,6 +11,8 @@ permissions:
 jobs:
   run:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+
     steps:
       - uses: actions/checkout@v4
 
@@ -29,8 +31,8 @@ jobs:
 
       - name: Save state
         run: |
-          git config user.name "actions"
+          git config user.name "github-actions"
           git config user.email "actions@github.com"
-          git add -A
-          git diff --cached --quiet || git commit -m "state"
+          git add state.json
+          git commit -m "state" || echo "no changes"
           git push
