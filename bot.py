@@ -10,28 +10,28 @@ CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
 
 STATE    = "state.json"
 INTERVAL = 40 * 60
-TEST     = True
+TEST     = False
 
 JINA = "https://r.jina.ai/"
 BASE = "https://www.list.am"
 
-# Важно: НЕ браузерный User-Agent — иначе Cloudflare отдаёт 403.
+# Важно: не браузерный User-Agent, иначе Cloudflare отдаёт 403.
 HDRS = {"User-Agent": "curl/8.5.0"}
 
 SECTIONS = {"4": "Электроника", "133": "Дом и сад",
             "27": "Детский мир", "16": "Транспорт"}
 
 def jina(sess, url):
-    """Читает страницу через r.jina.ai (3 попытки)."""
-    for attempt in range(3):
+    """Читает страницу через r.jina.ai (до 5 попыток с паузой)."""
+    for attempt in range(5):
         try:
             r = sess.get(JINA + url, headers=HDRS, timeout=90)
-            if r.status_code == 200:
+            if r.status_code == 200 and r.text.strip():
                 return r.text
             print(f"  jina {r.status_code}, попытка {attempt + 1}")
         except Exception as e:
             print(f"  jina ошибка: {type(e).__name__}: {e}")
-        time.sleep(5)
+        time.sleep(10)
     return ""
 
 def get_ids(sess):
@@ -47,7 +47,7 @@ def get_ids(sess):
         for i in uniq:
             if i not in ids:
                 ids.append(i)
-        time.sleep(3)
+        time.sleep(15)
     return ids
 
 def item_data(sess, iid):
@@ -130,7 +130,6 @@ def main():
     if TEST:
         if ids:
             d = item_data(sess, ids[0])
-            print("TEST данные:", json.dumps(d, ensure_ascii=False)[:800])
             send(sess, d, ids[0])
         return
 
@@ -151,7 +150,7 @@ def main():
         iid = st["queue"].pop(0)
         try:
             d = item_data(sess, iid)
-            if send(sess, d, iid):
+            if d["title"] and send(sess, d, iid):
                 st["last_publish"] = now
             else:
                 st["queue"].insert(0, iid)
