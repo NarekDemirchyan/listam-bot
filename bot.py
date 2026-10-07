@@ -30,6 +30,19 @@ SEED = {"393": 20, "39": 20, "17": 20}
 PHOTO_RE = re.compile(
     r"https://img\.list\.am/(f|n|g|r)/\d+/(\d+)\.(?:webp|jpg|jpeg|png)")
 
+def truncate(text, limit, ellipsis="…"):
+    """Обрезка: сначала по концу предложения, иначе по последнему пробелу."""
+    text = (text or "").strip()
+    if len(text) <= limit:
+        return text
+    cut = text[:limit]
+    m = re.search(r"[.!?…][\s\"]", cut)
+    if m and m.end() > limit * 0.5:
+        return cut[:m.end()].rstrip()
+    if " " in cut:
+        cut = cut[:cut.rfind(" ")]
+    return cut.rstrip() + ellipsis
+
 def jina(sess, url, extra=None):
     h = dict(HDRS)
     if extra:
@@ -61,7 +74,7 @@ def translate(sess, text):
     try:
         r = sess.get("https://translate.googleapis.com/translate_a/single",
                      params={"client": "gtx", "sl": "auto", "tl": "ru",
-                             "dt": "t", "q": text[:2000]}, timeout=30)
+                             "dt": "t", "q": truncate(text, 2000)}, timeout=30)
         data = r.json()
         res = "".join(p[0] for p in data[0] if p and p[0]).strip()
         if res:
@@ -99,12 +112,10 @@ def item_data(sess, iid):
     m = re.search(r"^#\s+(.+)$", md, re.M)
     if m:
         title = m.group(1).strip()
-    if not title:
+    else:
         m = re.search(r"^Title:\s*(.+)$", md, re.M)
         if m:
-            title = m.group(1).strip()
-            if " - " in title:
-                title = title.rsplit(" - ", 1)[0].strip()
+            title = m.group(1).split(" - ")[0].strip()
 
     price = ""
     m = re.search(r"([\d][\d\s,]*)\s*֏", md)
@@ -127,14 +138,16 @@ def item_data(sess, iid):
             "place": place, "photos": photos}
 
 def make_caption(sess, d):
-    lines = [translate(sess, d["title"])]
+    lines = []
+    if d["title"]:
+        lines.append(translate(sess, d["title"]))
     if d["price"]:
         lines.append(d["price"])
     if d["place"]:
         lines.append(d["place"])
     if d["desc"]:
-        lines.append(translate(sess, d["desc"][:700]))
-    return "\n\n".join(x for x in lines if x)[:1024]
+        lines.append(translate(sess, truncate(d["desc"], 300)))
+    return truncate("\n\n".join(x for x in lines if x), 1024)
 
 def send(sess, d, iid, caption):
     url = f"{BASE}/ru/item/{iid}"
@@ -172,8 +185,12 @@ def send(sess, d, iid, caption):
     return r.ok
 
 def load():
-    if os.path.exists(STATE):
-        return json.load(open(STATE, encoding="utf-8"))
+    try:
+        if os.path.exists(STATE):
+            with open(STATE, encoding="utf-8") as f:
+                return json.load(f)
+    except Exception as e:
+        print("state.json повреждён, стартуем с чистого:", e)
     return {"seen": [], "queue": [], "last_publish": 0, "seeded": []}
 
 def save(st):
@@ -233,9 +250,7 @@ def main():
         iid = st["queue"].pop(0)
         try:
             d = item_data(sess, iid)
-            if not d["title"]:
-                print("не прочиталось, пропускаю:", iid)
-            elif send(sess, d, iid, make_caption(sess, d)):
+            if d["title"] and send(sess, d, iid, make_caption(sess, d)):
                 st["last_publish"] = now
             else:
                 st["queue"].insert(0, iid)
@@ -245,4 +260,10 @@ def main():
 
     save(st)
 
-main()
+if __name__ == "__main__":
+    import traceback
+    try:
+        main()
+    except Exception:
+        traceback.print_exc()
+        raise
