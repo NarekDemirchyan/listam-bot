@@ -19,15 +19,13 @@ jobs:
           python-version: "3.12"
 
       - name: Install
-        run: |
-          pip install requests beautifulsoup4 playwright
-          which xvfb-run || (sudo apt-get update && sudo apt-get install -y xvfb)
+        run: pip install requests
 
       - name: Run bot
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-        run: xvfb-run -a python bot.py
+        run: python bot.py
 
       - name: Save state
         run: |
