@@ -26,15 +26,15 @@ def jina(sess, url, extra=None):
     h = dict(HDRS)
     if extra:
         h.update(extra)
-    for attempt in range(5):
+    for attempt in range(3):
         try:
-            r = sess.get(JINA + url, headers=h, timeout=90)
+            r = sess.get(JINA + url, headers=h, timeout=60)
             if r.status_code == 200 and r.text.strip():
                 return r.text
             print(f"  jina {r.status_code}, попытка {attempt + 1}")
         except Exception as e:
             print(f"  jina ошибка: {type(e).__name__}: {e}")
-        time.sleep(10)
+        time.sleep(5)
     return ""
 
 def collect_photos(text):
@@ -75,7 +75,7 @@ def get_ids(sess):
         for i in uniq:
             if i not in ids:
                 ids.append(i)
-        time.sleep(15)
+        time.sleep(8)
     return ids
 
 def item_data(sess, iid):
@@ -178,8 +178,7 @@ def main():
         if ids:
             d = item_data(sess, ids[0])
             print("фото найдено:", len(d["photos"]))
-            print("TEST данные:", json.dumps(
-                {k: v for k, v in d.items()}, ensure_ascii=False)[:800])
+            print("TEST данные:", json.dumps(d, ensure_ascii=False)[:800])
             send(sess, d, ids[0], make_caption(sess, d))
         return
 
