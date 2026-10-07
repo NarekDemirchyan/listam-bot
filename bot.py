@@ -16,8 +16,16 @@ JINA = "https://r.jina.ai/"
 BASE = "https://www.list.am"
 HDRS = {"User-Agent": "curl/8.5.0"}
 
-SECTIONS = {"4": "Электроника", "133": "Дом и сад",
-            "27": "Детский мир"}
+SECTIONS = {
+    "4":   "Электроника",
+    "133": "Дом и сад",
+    "27":  "Детский мир",
+    "393": "Красота и здоровье",
+    "39":  "Хобби и спорт",
+    "17":  "Мода и стиль",
+}
+
+SEED = {"393": 20, "39": 20, "17": 20}
 
 PHOTO_RE = re.compile(
     r"https://img\.list\.am/(f|n|g|r)/\d+/(\d+)\.(?:webp|jpg|jpeg|png)")
@@ -63,7 +71,7 @@ def translate(sess, text):
     return text
 
 def get_ids(sess):
-    ids = []
+    by_cat = {}
     for cat in SECTIONS:
         md = jina(sess, f"{BASE}/ru/category/{cat}")
         found = re.findall(r"/ru/item/(\d+)", md)
@@ -71,12 +79,10 @@ def get_ids(sess):
         for i in found:
             if i not in uniq:
                 uniq.append(i)
+        by_cat[cat] = uniq
         print(f"[{cat}] {SECTIONS[cat]}: {len(uniq)} объявлений")
-        for i in uniq:
-            if i not in ids:
-                ids.append(i)
         time.sleep(8)
-    return ids
+    return by_cat
 
 def item_data(sess, iid):
     md = jina(sess, f"{BASE}/ru/item/{iid}")
@@ -162,34 +168,56 @@ def send(sess, d, iid, caption):
 def load():
     if os.path.exists(STATE):
         return json.load(open(STATE, encoding="utf-8"))
-    return {"seen": [], "queue": [], "last_publish": 0}
+    return {"seen": [], "queue": [], "last_publish": 0, "seeded": []}
 
 def save(st):
     json.dump(st, open(STATE, "w", encoding="utf-8"), ensure_ascii=False)
 
 def main():
     st = load()
+    st.setdefault("seeded", [])
     sess = requests.Session()
 
-    ids = get_ids(sess)
-    print("всего ссылок:", len(ids), ids[:5])
+    by_cat = get_ids(sess)
+    total = sum(len(v) for v in by_cat.values())
+    print("всего ссылок:", total)
 
     if TEST:
-        if ids:
-            d = item_data(sess, ids[0])
+        flat = [i for v in by_cat.values() for i in v]
+        if flat:
+            d = item_data(sess, flat[0])
             print("фото найдено:", len(d["photos"]))
-            print("TEST данные:", json.dumps(d, ensure_ascii=False)[:800])
-            send(sess, d, ids[0], make_caption(sess, d))
+            send(sess, d, flat[0], make_caption(sess, d))
         return
 
-    first = not st["seen"]
-    for iid in ids:
-        if first:
-            st["seen"].append(iid)
+    if not st["seen"]:
+        for cat in by_cat:
+            for iid in by_cat[cat]:
+                if iid not in st["seen"]:
+                    st["seen"].append(iid)
+        save(st)
+        print("первый запуск: всё зарегистрировано, публикаций нет")
+        return
+
+    for cat in by_cat:
+        cat_ids = by_cat[cat]
+        if cat not in st["seeded"]:
+            st["seeded"].append(cat)
+            n = SEED.get(cat, 0)
+            picked = 0
+            for iid in cat_ids:
+                if iid not in st["seen"]:
+                    st["seen"].append(iid)
+                if picked < n:
+                    st["queue"].append(iid)
+                    picked += 1
+            print(f"новый раздел [{cat}] {SECTIONS[cat]}: в очередь {picked}")
             continue
-        if iid not in st["seen"]:
-            st["seen"].append(iid)
-            st["queue"].append(iid)
+
+        for iid in cat_ids:
+            if iid not in st["seen"]:
+                st["seen"].append(iid)
+                st["queue"].append(iid)
 
     st["seen"] = st["seen"][-5000:]
     now = time.time()
