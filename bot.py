@@ -99,6 +99,12 @@ def item_data(sess, iid):
     m = re.search(r"^#\s+(.+)$", md, re.M)
     if m:
         title = m.group(1).strip()
+    if not title:
+        m = re.search(r"^Title:\s*(.+)$", md, re.M)
+        if m:
+            title = m.group(1).strip()
+            if " - " in title:
+                title = title.rsplit(" - ", 1)[0].strip()
 
     price = ""
     m = re.search(r"([\d][\d\s,]*)\s*֏", md)
@@ -106,7 +112,7 @@ def item_data(sess, iid):
         price = m.group(1).strip() + " ֏"
 
     desc = ""
-    m = re.search(r"Описание\s*\n+(.+?)\n\s*Номер объявления", md, re.S)
+    m = re.search(r"Описание\s*\n+(.+?)(?:\n\s*Номер объявления|\Z)", md, re.S)
     if m:
         desc = " ".join(m.group(1).split())
 
@@ -227,7 +233,9 @@ def main():
         iid = st["queue"].pop(0)
         try:
             d = item_data(sess, iid)
-            if d["title"] and send(sess, d, iid, make_caption(sess, d)):
+            if not d["title"]:
+                print("не прочиталось, пропускаю:", iid)
+            elif send(sess, d, iid, make_caption(sess, d)):
                 st["last_publish"] = now
             else:
                 st["queue"].insert(0, iid)
