@@ -19,7 +19,7 @@ jobs:
           python-version: "3.12"
 
       - name: Install
-        run: pip install requests beautifulsoup4
+        run: pip install requests beautifulsoup4 playwright
 
       - name: Run bot
         env:
