@@ -31,6 +31,9 @@ SEED = {"393": 20, "39": 20, "17": 20}
 PHOTO_RE = re.compile(
     r"https://img\.list\.am/(f|n|g|r)/\d+/(\d+)\.(?:webp|jpg|jpeg|png)")
 
+CYR = re.compile(r"[А-Яа-яЁё]")
+ARM = re.compile(r"[Ա-ֆ]")
+
 def truncate(text, limit, ellipsis="…"):
     """Обрезка: сначала по концу предложения, иначе по последнему пробелу."""
     text = (text or "").strip()
@@ -68,21 +71,49 @@ def collect_photos(text):
             out[pid] = url
     return list(out.values())[:10]
 
+def _google_single(sess, text):
+    r = sess.get("https://translate.googleapis.com/translate_a/single",
+                 params={"client": "gtx", "sl": "auto", "tl": "ru",
+                         "dt": "t", "q": truncate(text, 2000)}, timeout=30)
+    data = r.json()
+    return "".join(p[0] for p in data[0] if p and p[0]).strip()
+
+def _google_chrome(sess, text):
+    r = sess.get("https://clients5.google.com/translate_a/t",
+                 params={"client": "dict-chrome-ex", "sl": "auto", "tl": "ru",
+                         "q": truncate(text, 2000)}, timeout=30)
+    data = r.json()
+    if isinstance(data, list) and data and isinstance(data[0], list):
+        return "".join(x for x in data[0] if isinstance(x, str)).strip()
+    return ""
+
+def _mymemory(sess, text):
+    r = sess.get("https://api.mymemory.translated.net/get",
+                 params={"q": truncate(text, 480), "langpair": "hy|ru"},
+                 timeout=30)
+    res = (r.json().get("responseData") or {}).get("translatedText", "")
+    return (res or "").strip()
+
 def translate(sess, text):
+    """Русский текст. Пустая строка = перевести не удалось."""
     text = (text or "").strip()
-    if not text:
+    if not text or CYR.search(text):
         return text
-    try:
-        r = sess.get("https://translate.googleapis.com/translate_a/single",
-                     params={"client": "gtx", "sl": "auto", "tl": "ru",
-                             "dt": "t", "q": truncate(text, 2000)}, timeout=30)
-        data = r.json()
-        res = "".join(p[0] for p in data[0] if p and p[0]).strip()
-        if res:
-            return res
-    except Exception as e:
-        print("  перевод недоступен:", type(e).__name__)
-    return text
+    if not ARM.search(text):
+        return text
+    for name, fn in (("google", _google_single),
+                     ("clients5", _google_chrome),
+                     ("mymemory", _mymemory)):
+        for attempt in range(2):
+            try:
+                res = fn(sess, text)
+                if res and CYR.search(res):
+                    return res
+            except Exception as e:
+                print(f"  перевод {name} ошибка: {type(e).__name__}")
+            time.sleep(2)
+        print(f"  перевод {name}: не удалось")
+    return ""
 
 def get_ids(sess):
     by_cat = {}
@@ -141,7 +172,10 @@ def item_data(sess, iid):
 def make_caption(sess, d):
     lines = []
     if d["title"]:
-        lines.append(translate(sess, d["title"]))
+        title = translate(sess, d["title"])
+        if not title:
+            return None
+        lines.append(title)
     if d["price"]:
         lines.append(d["price"])
     if d["place"]:
@@ -253,18 +287,29 @@ def main():
     print("очередь:", len(st["queue"]))
 
     if st["queue"] and now - st["last_publish"] >= INTERVAL:
-        iid = st["queue"].pop(0)
-        try:
-            d = item_data(sess, iid)
-            if not d["title"]:
-                print("объявление недоступно, пропускаем:", iid)
-            elif send(sess, d, iid, make_caption(sess, d)):
-                st["last_publish"] = now
-            else:
+        for _ in range(5):
+            if not st["queue"]:
+                break
+            iid = st["queue"].pop(0)
+            try:
+                d = item_data(sess, iid)
+                if not d["title"]:
+                    print("объявление недоступно, пропускаем:", iid)
+                    continue
+                cap = make_caption(sess, d)
+                if not cap:
+                    print("нет перевода, в конец очереди:", iid)
+                    st["queue"].append(iid)
+                    continue
+                if send(sess, d, iid, cap):
+                    st["last_publish"] = now
+                    break
                 st["queue"].append(iid)
-        except Exception as e:
-            print("ошибка публикации:", e)
-            st["queue"].append(iid)
+                break
+            except Exception as e:
+                print("ошибка публикации:", e)
+                st["queue"].append(iid)
+                break
 
     save(st)
 
