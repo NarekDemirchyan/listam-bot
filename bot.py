@@ -80,6 +80,26 @@ def translate(sess, text):
         print("  перевод недоступен:", type(e).__name__)
     return text
 
+def has_cyr(s):
+    return bool(re.search(r"[А-Яа-яЁё]", s or ""))
+
+def latin_junk(t):
+    """Латинский заголовок: короткий (бренд) — ок, длинный транслит — мусор."""
+    t = (t or "").strip()
+    if not t or has_cyr(t):
+        return False
+    return len(t.split()) > 2
+
+def headline(sess, d):
+    """Русская строка-заголовок. Пусто — публиковать нечего."""
+    t = translate(sess, d["title"]).strip()
+    if t and not latin_junk(t):
+        return t
+    alt = translate(sess, d["desc"][:300]).strip()
+    if has_cyr(alt):
+        return re.split(r"[.!?]\s", alt)[0].strip()[:90]
+    return ""
+
 def get_ids(sess):
     by_cat = {}
     for cat in SECTIONS:
@@ -131,7 +151,10 @@ def item_data(sess, iid):
             "place": place, "photos": photos}
 
 def make_caption(sess, d):
-    lines = [translate(sess, d["title"])]
+    head = headline(sess, d)
+    if not head:
+        return ""
+    lines = [head]
     if d["price"]:
         lines.append(d["price"])
     if d["place"]:
@@ -239,7 +262,8 @@ def main():
         ok = False
         try:
             d = item_data(sess, iid)
-            ok = bool(d["title"]) and send(sess, d, iid, make_caption(sess, d))
+            cap = make_caption(sess, d)
+            ok = bool(cap) and send(sess, d, iid, cap)
         except Exception as e:
             print("ошибка публикации:", e)
             ok = False
