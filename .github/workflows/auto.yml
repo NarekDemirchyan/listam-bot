@@ -1,0 +1,40 @@
+name: auto
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: auto
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install
+        run: pip install requests
+
+      - name: Run auto
+        env:
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_CHAT_ID_AUTO: ${{ secrets.TELEGRAM_CHAT_ID_AUTO }}
+        run: python auto.py
+
+      - name: Save state
+        run: |
+          git config user.name "github-actions"
+          git config user.email "actions@github.com"
+          git add state_auto.json || true
+          git diff --cached --quiet || git commit -m "state-auto"
+          git pull --rebase --autostash || true
+          git push || true
