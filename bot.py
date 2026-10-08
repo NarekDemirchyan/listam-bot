@@ -28,7 +28,8 @@ SECTIONS = {
 SEED = {"393": 20, "39": 20, "17": 20}
 
 PHOTO_RE = re.compile(
-    r"https://img\.list\.am/(f|n|g|r)/\d+/(\d+)\.(?:webp|jpg|jpeg|png)")
+    r"(https?:)?//img\.list\.am/([a-z]+)/\d+/(\d+)\.(?:webp|jpg|jpeg|png)",
+    re.I)
 
 # --- защита от "Just a moment" -------------------------------------------
 
@@ -59,8 +60,10 @@ def collect_photos(text):
     """Уникальные фото; при наличии берём полный размер (f)."""
     out = {}
     for m in PHOTO_RE.finditer(text):
-        kind, pid, url = m.group(1), m.group(2), m.group(0)
-        if pid not in out or kind == "f":
+        kind, pid, url = m.group(2).lower(), m.group(3), m.group(0)
+        if url.startswith("//"):
+            url = "https:" + url
+        if pid not in out or kind in ("f", "l"):
             out[pid] = url
     return list(out.values())[:10]
 
@@ -146,9 +149,11 @@ def item_data(sess, iid):
         place = m.group(1).strip()
 
     photos = collect_photos(md + "\n" + html)
+    print(f"  {iid}: фото {len(photos)}, md {len(md)}, html {len(html)}")
 
     return {"title": title, "price": price, "desc": desc,
-            "place": place, "photos": photos}
+            "place": place, "photos": photos,
+            "url": f"{BASE}/ru/item/{iid}"}
 
 def make_caption(sess, d):
     head = headline(sess, d)
@@ -161,10 +166,11 @@ def make_caption(sess, d):
         lines.append(d["place"])
     if d["desc"]:
         lines.append(translate(sess, d["desc"][:700]))
+    lines.append("Связаться: " + d["url"])
     return "\n\n".join(x for x in lines if x)[:1024]
 
 def send(sess, d, iid, caption):
-    url = f"{BASE}/ru/item/{iid}"
+    url = d["url"]
     markup = {"inline_keyboard": [[{"text": "Связаться", "url": url}]]}
     photos = d["photos"]
 
@@ -177,10 +183,29 @@ def send(sess, d, iid, caption):
                             "media": json.dumps(media, ensure_ascii=False)},
                       timeout=60)
         print("telegram album:", r.status_code, r.text[:200])
+
+        if not r.ok:
+            payload = {"chat_id": CHAT_ID, "photo": photos[0],
+                       "caption": caption, "reply_markup": json.dumps(markup)}
+            r1 = sess.post(f"https://api.telegram.org/bot{TOKEN}/sendPhoto",
+                           data=payload, timeout=40)
+            print("telegram fallback:", r1.status_code, r1.text[:200])
+            return r1.ok
+
+        mid = None
+        try:
+            res = r.json().get("result") or []
+            if res:
+                mid = res[0]["message_id"]
+        except Exception:
+            mid = None
+
+        payload = {"chat_id": CHAT_ID, "text": "Связаться с продавцом",
+                   "reply_markup": json.dumps(markup)}
+        if mid:
+            payload["reply_parameters"] = json.dumps({"message_id": mid})
         r2 = sess.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage",
-                       data={"chat_id": CHAT_ID,
-                             "text": "Связаться с продавцом",
-                             "reply_markup": json.dumps(markup)}, timeout=40)
+                       data=payload, timeout=40)
         print("telegram кнопка:", r2.status_code, r2.text[:200])
         return r.ok and r2.ok
 
