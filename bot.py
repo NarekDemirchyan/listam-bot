@@ -9,8 +9,7 @@ TOKEN   = os.environ.get("TELEGRAM_TOKEN", "")
 CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
 
 STATE    = "state.json"
-INTERVAL = 18 * 60
-MAX_QUEUE = 150
+INTERVAL = 30 * 60
 TEST = False
 
 JINA = "https://r.jina.ai/"
@@ -31,35 +30,29 @@ SEED = {"393": 20, "39": 20, "17": 20}
 PHOTO_RE = re.compile(
     r"https://img\.list\.am/(f|n|g|r)/\d+/(\d+)\.(?:webp|jpg|jpeg|png)")
 
-CYR = re.compile(r"[А-Яа-яЁё]")
-ARM = re.compile(r"[Ա-ֆ]")
+# --- защита от "Just a moment" -------------------------------------------
 
-def truncate(text, limit, ellipsis="…"):
-    """Обрезка: сначала по концу предложения, иначе по последнему пробелу."""
-    text = (text or "").strip()
-    if len(text) <= limit:
-        return text
-    cut = text[:limit]
-    m = re.search(r"[.!?…][\s\"]", cut)
-    if m and m.end() > limit * 0.5:
-        return cut[:m.end()].rstrip()
-    if " " in cut:
-        cut = cut[:cut.rfind(" ")]
-    return cut.rstrip() + ellipsis
+BLOCKED = ("just a moment", "attention required", "enable javascript",
+           "checking your browser", "cloudflare")
+
+def is_blocked(text):
+    """True, если вместо страницы вернулась защита или пустышка."""
+    t = (text or "").strip()
+    return len(t) < 800 or any(m in t.lower() for m in BLOCKED)
 
 def jina(sess, url, extra=None):
     h = dict(HDRS)
     if extra:
         h.update(extra)
-    for attempt in range(3):
+    for attempt in range(4):
         try:
             r = sess.get(JINA + url, headers=h, timeout=60)
-            if r.status_code == 200 and r.text.strip():
+            if r.status_code == 200 and not is_blocked(r.text):
                 return r.text
-            print(f"  jina {r.status_code}, попытка {attempt + 1}")
+            print(f"  jina {r.status_code} / защита, попытка {attempt + 1}")
         except Exception as e:
             print(f"  jina ошибка: {type(e).__name__}: {e}")
-        time.sleep(5)
+        time.sleep(10 * (attempt + 1))
     return ""
 
 def collect_photos(text):
@@ -71,49 +64,21 @@ def collect_photos(text):
             out[pid] = url
     return list(out.values())[:10]
 
-def _google_single(sess, text):
-    r = sess.get("https://translate.googleapis.com/translate_a/single",
-                 params={"client": "gtx", "sl": "auto", "tl": "ru",
-                         "dt": "t", "q": truncate(text, 2000)}, timeout=30)
-    data = r.json()
-    return "".join(p[0] for p in data[0] if p and p[0]).strip()
-
-def _google_chrome(sess, text):
-    r = sess.get("https://clients5.google.com/translate_a/t",
-                 params={"client": "dict-chrome-ex", "sl": "auto", "tl": "ru",
-                         "q": truncate(text, 2000)}, timeout=30)
-    data = r.json()
-    if isinstance(data, list) and data and isinstance(data[0], list):
-        return "".join(x for x in data[0] if isinstance(x, str)).strip()
-    return ""
-
-def _mymemory(sess, text):
-    r = sess.get("https://api.mymemory.translated.net/get",
-                 params={"q": truncate(text, 480), "langpair": "hy|ru"},
-                 timeout=30)
-    res = (r.json().get("responseData") or {}).get("translatedText", "")
-    return (res or "").strip()
-
 def translate(sess, text):
-    """Русский текст. Пустая строка = перевести не удалось."""
     text = (text or "").strip()
-    if not text or CYR.search(text):
+    if not text:
         return text
-    if not ARM.search(text):
-        return text
-    for name, fn in (("google", _google_single),
-                     ("clients5", _google_chrome),
-                     ("mymemory", _mymemory)):
-        for attempt in range(2):
-            try:
-                res = fn(sess, text)
-                if res and CYR.search(res):
-                    return res
-            except Exception as e:
-                print(f"  перевод {name} ошибка: {type(e).__name__}")
-            time.sleep(2)
-        print(f"  перевод {name}: не удалось")
-    return ""
+    try:
+        r = sess.get("https://translate.googleapis.com/translate_a/single",
+                     params={"client": "gtx", "sl": "auto", "tl": "ru",
+                             "dt": "t", "q": text[:2000]}, timeout=30)
+        data = r.json()
+        res = "".join(p[0] for p in data[0] if p and p[0]).strip()
+        if res:
+            return res
+    except Exception as e:
+        print("  перевод недоступен:", type(e).__name__)
+    return text
 
 def get_ids(sess):
     by_cat = {}
@@ -144,10 +109,6 @@ def item_data(sess, iid):
     m = re.search(r"^#\s+(.+)$", md, re.M)
     if m:
         title = m.group(1).strip()
-    else:
-        m = re.search(r"^Title:\s*(.+)$", md, re.M)
-        if m:
-            title = m.group(1).split(" - ")[0].strip()
 
     price = ""
     m = re.search(r"([\d][\d\s,]*)\s*֏", md)
@@ -155,7 +116,7 @@ def item_data(sess, iid):
         price = m.group(1).strip() + " ֏"
 
     desc = ""
-    m = re.search(r"Описание\s*\n+(.+?)(?:\n\s*Номер объявления|\Z)", md, re.S)
+    m = re.search(r"Описание\s*\n+(.+?)\n\s*Номер объявления", md, re.S)
     if m:
         desc = " ".join(m.group(1).split())
 
@@ -170,19 +131,14 @@ def item_data(sess, iid):
             "place": place, "photos": photos}
 
 def make_caption(sess, d):
-    lines = []
-    if d["title"]:
-        title = translate(sess, d["title"])
-        if not title:
-            return None
-        lines.append(title)
+    lines = [translate(sess, d["title"])]
     if d["price"]:
         lines.append(d["price"])
     if d["place"]:
         lines.append(d["place"])
     if d["desc"]:
-        lines.append(translate(sess, truncate(d["desc"], 300)))
-    return truncate("\n\n".join(x for x in lines if x), 1024)
+        lines.append(translate(sess, d["desc"][:700]))
+    return "\n\n".join(x for x in lines if x)[:1024]
 
 def send(sess, d, iid, caption):
     url = f"{BASE}/ru/item/{iid}"
@@ -220,12 +176,8 @@ def send(sess, d, iid, caption):
     return r.ok
 
 def load():
-    try:
-        if os.path.exists(STATE):
-            with open(STATE, encoding="utf-8") as f:
-                return json.load(f)
-    except Exception as e:
-        print("state.json повреждён, стартуем с чистого:", e)
+    if os.path.exists(STATE):
+        return json.load(open(STATE, encoding="utf-8"))
     return {"seen": [], "queue": [], "last_publish": 0, "seeded": []}
 
 def save(st):
@@ -234,6 +186,7 @@ def save(st):
 def main():
     st = load()
     st.setdefault("seeded", [])
+    st.setdefault("failed", {})
     sess = requests.Session()
 
     by_cat = get_ids(sess)
@@ -277,46 +230,30 @@ def main():
                 st["seen"].append(iid)
                 st["queue"].append(iid)
 
-    if len(st["queue"]) > MAX_QUEUE:
-        removed = len(st["queue"]) - MAX_QUEUE
-        st["queue"] = st["queue"][-MAX_QUEUE:]
-        print(f"очередь ограничена, удалено старых: {removed}")
-
     st["seen"] = st["seen"][-5000:]
     now = time.time()
     print("очередь:", len(st["queue"]))
 
     if st["queue"] and now - st["last_publish"] >= INTERVAL:
-        for _ in range(5):
-            if not st["queue"]:
-                break
-            iid = st["queue"].pop(0)
-            try:
-                d = item_data(sess, iid)
-                if not d["title"]:
-                    print("объявление недоступно, пропускаем:", iid)
-                    continue
-                cap = make_caption(sess, d)
-                if not cap:
-                    print("нет перевода, в конец очереди:", iid)
-                    st["queue"].append(iid)
-                    continue
-                if send(sess, d, iid, cap):
-                    st["last_publish"] = now
-                    break
+        iid = st["queue"].pop(0)
+        ok = False
+        try:
+            d = item_data(sess, iid)
+            ok = bool(d["title"]) and send(sess, d, iid, make_caption(sess, d))
+        except Exception as e:
+            print("ошибка публикации:", e)
+            ok = False
+
+        if ok:
+            st["last_publish"] = now
+        else:
+            st["failed"][iid] = st["failed"].get(iid, 0) + 1
+            if st["failed"][iid] < 2:
                 st["queue"].append(iid)
-                break
-            except Exception as e:
-                print("ошибка публикации:", e)
-                st["queue"].append(iid)
-                break
+                print(f"  вернём в конец очереди: {iid}")
+            else:
+                print(f"  брошен {iid}: не удалось 2 раза")
 
     save(st)
 
-if __name__ == "__main__":
-    import traceback
-    try:
-        main()
-    except Exception:
-        traceback.print_exc()
-        raise
+main()
