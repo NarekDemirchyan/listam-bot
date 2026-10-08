@@ -166,7 +166,6 @@ def make_caption(sess, d):
         lines.append(d["place"])
     if d["desc"]:
         lines.append(translate(sess, d["desc"][:700]))
-    lines.append("Связаться: " + d["url"])
     return "\n\n".join(x for x in lines if x)[:1024]
 
 def send(sess, d, iid, caption):
