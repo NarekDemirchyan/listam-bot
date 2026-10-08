@@ -106,12 +106,12 @@ def item_data(sess, path):
         price = re.sub(r"[.,]00$", "", m.group(1).strip()) + " " + m.group(2)
 
     desc = ""
-    m = re.search(r"Описание\s*\*\n+(.+?)\n+\d{2}\.\d{2}\.\d{4}", md, re.S)
+    m = re.search(r"Описание\s*\n+(.+?)\n+\d{2}\.\d{2}\.\d{4}", md, re.S)
     if m:
         desc = " ".join(m.group(1).split())
 
     place = ""
-    m = re.search(r"Расположение\s*\*\n+(.+)", md)
+    m = re.search(r"Расположение\s*\n+(.+)", md)
     if m:
         place = m.group(1).strip()[:60]
 
