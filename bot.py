@@ -303,11 +303,7 @@ def main():
                 break
 
             st["failed"][iid] = st["failed"].get(iid, 0) + 1
-            if st["failed"][iid] < 2:
-                st["queue"].append(iid)
-                print(f"  вернём в конец очереди: {iid}")
-            else:
-                print(f"  брошен {iid}: не удалось 2 раза")
+            print(f"  убран из очереди: {iid}")
 
     save(st)
 
