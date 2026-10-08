@@ -159,7 +159,7 @@ def make_caption(sess, d):
         lines.append(d["where"])
     desc = d["desc"]
     if desc and not has_cyr(desc):
-        desc = translate(sess, desc)
+        desc = translate(sess, desc) if len(desc) >= 60 else ""
     if desc:
         lines.append(desc)
     if d["phone"]:
@@ -213,7 +213,7 @@ def main():
 
     if not st["seen"]:
         st["seen"] = ids[:]
-        st["queue"] = ids[:SEED]
+        st["queue"] = ids[-SEED:]
         save(st)
         print(f"первый запуск: в очередь {len(st['queue'])}, публикаций нет")
         return
