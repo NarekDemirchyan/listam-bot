@@ -13,7 +13,7 @@ INTERVAL = 18 * 60
 TEST = False
 
 JINA = "https://r.jina.ai/"
-BASE = "https://www.listam.am"
+BASE = "https://www.list.am"
 HDRS = {"User-Agent": "curl/8.5.0"}
 
 SECTIONS = {
