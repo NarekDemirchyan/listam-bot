@@ -28,8 +28,8 @@ CATS = [
     "2328c-hobbi-hangist-ev-sport", # Հոբբի, հանգիստ և սպորտ
 ]
 
-ITEM_RE = re.compile(r"https://gortsarq\.am/ru/(\d+)p-[^)\s>"']+")
-PHOTO_RE = re.compile(r"https://gortsarq\.am/images/detailed/\d+/[^)\s>"']+")
+ITEM_RE = re.compile(r"""https://gortsarq\.am/ru/(\d+)p-[^)"'\s>]+""")
+PHOTO_RE = re.compile(r"""https://gortsarq\.am/images/detailed/\d+/[^)"'\s>]+""")
 
 BLOCKED = ("just a moment", "attention required", "enable javascript",
            "checking your browser", "cloudflare")
@@ -159,6 +159,14 @@ def send(sess, d, caption):
                             "media": json.dumps(media, ensure_ascii=False)},
                       timeout=60)
         print("telegram album:", r.status_code, r.text[:200])
+
+        if not r.ok:
+            payload = {"chat_id": CHAT_ID, "photo": photos[0],
+                       "caption": caption, "reply_markup": json.dumps(markup)}
+            r1 = sess.post(f"https://api.telegram.org/bot{TOKEN}/sendPhoto",
+                           data=payload, timeout=40)
+            print("telegram fallback:", r1.status_code, r1.text[:200])
+            return r1.ok
 
         mid = None
         try:
