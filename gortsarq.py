@@ -96,14 +96,18 @@ def item_data(sess, path):
         return None
 
     title = ""
-    m = re.search(r"^#\s+(.+)$", md, re.M)
+    m = re.search(r"^#{1,3}\s+(.+)$", md, re.M)
     if m:
         title = m.group(1).strip()
 
     price = ""
     m = re.search(r"([\d][\d\s,\.]*)\s*(֏|\$|€)", md)
     if m:
-        price = re.sub(r"[.,]00$", "", m.group(1).strip()) + " " + m.group(2)
+        num = re.sub(r"[.,]00$", "", m.group(1).strip())
+        if re.search(r"[1-9]", num):
+            price = num + " " + m.group(2)
+    if not price and "Договорная" in md:
+        price = "Договорная"
 
     desc = ""
     m = re.search(r"Описание\s*\n+(.+?)\n+\d{2}\.\d{2}\.\d{4}", md, re.S)
