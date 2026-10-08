@@ -13,7 +13,7 @@ INTERVAL = 18 * 60
 TEST = False
 
 JINA = "https://r.jina.ai/"
-BASE = "https://www.list.am"
+BASE = "https://www.listam.am"
 HDRS = {"User-Agent": "curl/8.5.0"}
 
 SECTIONS = {
@@ -258,19 +258,26 @@ def main():
     print("очередь:", len(st["queue"]))
 
     if st["queue"] and now - st["last_publish"] >= INTERVAL:
-        iid = st["queue"].pop(0)
-        ok = False
-        try:
-            d = item_data(sess, iid)
-            cap = make_caption(sess, d)
-            ok = bool(cap) and send(sess, d, iid, cap)
-        except Exception as e:
-            print("ошибка публикации:", e)
+        # до трёх попыток в одном слоте: если объявление не вышло,
+        # сразу берём следующее из очереди, чтобы время не пропадало
+        for _ in range(3):
+            if not st["queue"]:
+                break
+            iid = st["queue"].pop(0)
             ok = False
+            try:
+                d = item_data(sess, iid)
+                cap = make_caption(sess, d)
+                ok = bool(cap) and send(sess, d, iid, cap)
+            except Exception as e:
+                print("ошибка публикации:", e)
+                ok = False
 
-        if ok:
-            st["last_publish"] = now
-        else:
+            if ok:
+                st["last_publish"] = now
+                print(f"опубликовано: {iid}")
+                break
+
             st["failed"][iid] = st["failed"].get(iid, 0) + 1
             if st["failed"][iid] < 2:
                 st["queue"].append(iid)
