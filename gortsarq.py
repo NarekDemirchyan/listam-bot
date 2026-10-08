@@ -9,7 +9,7 @@ TOKEN = os.environ.get("TELEGRAM_TOKEN", "")
 CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
 
 STATE = "state-gortsarq.json"
-INTERVAL = 35 * 60
+INTERVAL = 5 * 60
 SEED = 120
 TEST = False
 
@@ -21,7 +21,7 @@ CATS = [
     "265c-2-ansharj-guyq",          # Անշարժ գույք
     "1796c-pahestamaser",           # Պահեստամասեր
     "1875c-kendaniner",             # Կենդանիներ
-    "1904c-elektronika-hy",         # Էլեկտրոնիկա
+    "1904c-elektronika-hy",         # Էլեկտրոնika
     "2063c-tun-ev-aygi",            # Տուն և այգի
     "2116c-noradzevutyun-ev-och",   # Նորաձևություն և ոճ
     "2295c-mankakan-ashxarh",       # Մանկական աշխարհ
@@ -277,11 +277,7 @@ def main():
                 break
 
             st["failed"][path] = st["failed"].get(path, 0) + 1
-            if st["failed"][path] < 2:
-                st["queue"].append(path)
-                print(f"  вернём в конец очереди: {path}")
-            else:
-                print(f"  брошен {path}: не удалось 2 раза")
+            print(f"  убран из очереди: {path}")
 
     save(st)
 
