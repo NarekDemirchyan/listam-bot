@@ -14,9 +14,11 @@ jobs:
       cancel-in-progress: false
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+
       - name: run
         run: |
           pip install requests
@@ -24,6 +26,7 @@ jobs:
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+
       - name: save state
         run: |
           git config user.name "github-actions"
