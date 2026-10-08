@@ -38,10 +38,13 @@ def is_blocked(text):
     t = (text or "").strip()
     return len(t) < 800 or any(m in t.lower() for m in BLOCKED)
 
-def jina(sess, url):
+def jina(sess, url, extra=None):
+    h = dict(HDRS)
+    if extra:
+        h.update(extra)
     for attempt in range(4):
         try:
-            r = sess.get(JINA + url, headers=HDRS, timeout=60)
+            r = sess.get(JINA + url, headers=h, timeout=60)
             if r.status_code == 200 and not is_blocked(r.text):
                 return r.text
             print(f" jina {r.status_code} / защита, попытка {attempt + 1}")
@@ -95,6 +98,11 @@ def item_data(sess, path):
     if not md:
         return None
 
+    html = jina(sess, BASE + path, {"x-respond-with": "html"})
+    cut = html.find("Похожие")
+    if cut > 0:
+        html = html[:cut]
+
     title = ""
     m = re.search(r"^#{1,3}\s+(.+)$", md, re.M)
     if m:
@@ -120,7 +128,7 @@ def item_data(sess, path):
         place = m.group(1).strip()[:60]
 
     photos = []
-    for m in PHOTO_RE.finditer(md):
+    for m in PHOTO_RE.finditer(md + "\n" + html):
         if m.group(0) not in photos:
             photos.append(m.group(0))
 
