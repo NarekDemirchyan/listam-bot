@@ -9,7 +9,7 @@ TOKEN   = os.environ.get("TELEGRAM_TOKEN", "")
 CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
 
 STATE    = "state.json"
-INTERVAL = 18 * 60
+INTERVAL = 5 * 60
 TEST = False
 
 JINA = "https://r.jina.ai/"
