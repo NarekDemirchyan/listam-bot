@@ -101,9 +101,9 @@ def item_data(sess, path):
         title = m.group(1).strip()
 
     price = ""
-    m = re.search(r"([\d][\d\s,\.]*)\s*֏", md)
+    m = re.search(r"([\d][\d\s,\.]*)\s*(֏|\$|€)", md)
     if m:
-        price = re.sub(r"[.,]00$", "", m.group(1).strip()) + " ֏"
+        price = re.sub(r"[.,]00$", "", m.group(1).strip()) + " " + m.group(2)
 
     desc = ""
     m = re.search(r"Описание\s*\n+(.+?)\n+\d{2}\.\d{2}\.\d{4}", md, re.S)
