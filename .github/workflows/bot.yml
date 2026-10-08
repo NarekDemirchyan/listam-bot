@@ -1,8 +1,6 @@
 name: listam bot
 
 on:
-  schedule:
-    - cron: "*/20 * * * *"
   workflow_dispatch:
 
 permissions:
@@ -38,4 +36,5 @@ jobs:
           git config user.email "actions@github.com"
           git add state.json
           git commit -m "state" || echo "no changes"
-          git push
+          git pull --rebase --autostash || true
+          git push || true
