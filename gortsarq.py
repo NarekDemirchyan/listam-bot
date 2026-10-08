@@ -9,7 +9,7 @@ TOKEN   = os.environ.get("TELEGRAM_TOKEN", "")
 CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
 
 STATE    = "state-gortsarq.json"
-INTERVAL = 38 * 60
+INTERVAL = 35 * 60
 SEED     = 120
 TEST = False
 
