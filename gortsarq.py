@@ -248,24 +248,32 @@ def main():
     print("очередь:", len(st["queue"]))
 
     if st["queue"] and now - st["last_publish"] >= INTERVAL:
-        path = st["queue"].pop(0)
-        ok = False
-        try:
-            d = item_data(sess, path)
-            cap = make_caption(sess, d) if d else ""
-            ok = bool(cap) and send(sess, d, cap)
-        except Exception as e:
-            print("ошибка публикации:", e)
+        # до трёх попыток в одном слоте: если объявление не вышло,
+        # сразу берём следующее из очереди, чтобы время не пропадало
+        for _ in range(3):
+            if not st["queue"]:
+                break
+            path = st["queue"].pop(0)
+            ok = False
+            try:
+                d = item_data(sess, path)
+                cap = make_caption(sess, d) if d else ""
+                ok = bool(cap) and send(sess, d, cap)
+            except Exception as e:
+                print("ошибка публикации:", e)
+                ok = False
 
-        if ok:
-            st["last_publish"] = now
-        else:
+            if ok:
+                st["last_publish"] = now
+                print(f"опубликовано: {path}")
+                break
+
             st["failed"][path] = st["failed"].get(path, 0) + 1
             if st["failed"][path] < 2:
                 st["queue"].append(path)
-                print(" вернём в конец очереди")
+                print(f"  вернём в конец очереди: {path}")
             else:
-                print(" брошен: не удалось 2 раза")
+                print(f"  брошен {path}: не удалось 2 раза")
 
     save(st)
 
