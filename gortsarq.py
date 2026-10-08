@@ -5,12 +5,12 @@ import json
 import time
 import requests
 
-TOKEN   = os.environ.get("TELEGRAM_TOKEN", "")
+TOKEN = os.environ.get("TELEGRAM_TOKEN", "")
 CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
 
-STATE    = "state-gortsarq.json"
+STATE = "state-gortsarq.json"
 INTERVAL = 35 * 60
-SEED     = 120
+SEED = 120
 TEST = False
 
 JINA = "https://r.jina.ai/"
@@ -18,18 +18,18 @@ BASE = "https://gortsarq.am"
 HDRS = {"User-Agent": "curl/8.5.0"}
 
 CATS = [
-    "265c-2-ansharj-guyq",              # Անշարժ գույք
-    "1796c-pahestamaser",               # Պահեստամասեր
-    "1875c-kendaniner",                 # Կենդանիներ
-    "1904c-elektronika-hy",             # Էլեկտրոնիկա
-    "2063c-tun-ev-aygi",                # Տուն և այգի
-    "2116c-noradzevutyun-ev-och",       # Նորաձևություն և ոճ
-    "2295c-mankakan-ashxarh",           # Մանկական աշխարհ
-    "2328c-hobbi-hangist-ev-sport",     # Հոբբի, հանգիստ և սպորտ
+    "265c-2-ansharj-guyq",          # Անշարժ գույք
+    "1796c-pahestamaser",           # Պահեստամասեր
+    "1875c-kendaniner",             # Կենդանիներ
+    "1904c-elektronika-hy",         # Էլեկտրոնիկա
+    "2063c-tun-ev-aygi",            # Տուն և այգի
+    "2116c-noradzevutyun-ev-och",   # Նորաձևություն և ոճ
+    "2295c-mankakan-ashxarh",       # Մանկական աշխարհ
+    "2328c-hobbi-hangist-ev-sport", # Հոբբի, հանգիստ և սպորտ
 ]
 
-ITEM_RE  = re.compile(r"https://gortsarq\.am/ru/(\d+)p-[^)\"'\s>]+")
-PHOTO_RE = re.compile(r"https://gortsarq\.am/images/detailed/\d+/[^)\"'\s>]+")
+ITEM_RE = re.compile(r"https://gortsarq\.am/ru/(\d+)p-[^)\s>"']+")
+PHOTO_RE = re.compile(r"https://gortsarq\.am/images/detailed/\d+/[^)\s>"']+")
 
 BLOCKED = ("just a moment", "attention required", "enable javascript",
            "checking your browser", "cloudflare")
@@ -44,9 +44,9 @@ def jina(sess, url):
             r = sess.get(JINA + url, headers=HDRS, timeout=60)
             if r.status_code == 200 and not is_blocked(r.text):
                 return r.text
-            print(f"  jina {r.status_code} / защита, попытка {attempt + 1}")
+            print(f" jina {r.status_code} / защита, попытка {attempt + 1}")
         except Exception as e:
-            print(f"  jina ошибка: {type(e).__name__}: {e}")
+            print(f" jina ошибка: {type(e).__name__}: {e}")
         time.sleep(8 * (attempt + 1))
     return ""
 
@@ -63,7 +63,7 @@ def translate(sess, text):
         if res:
             return res
     except Exception as e:
-        print("  перевод недоступен:", type(e).__name__)
+        print(" перевод недоступен:", type(e).__name__)
     return text
 
 def has_cyr(s):
@@ -106,12 +106,12 @@ def item_data(sess, path):
         price = re.sub(r"[.,]00$", "", m.group(1).strip()) + " " + m.group(2)
 
     desc = ""
-    m = re.search(r"Описание\s*\n+(.+?)\n+\d{2}\.\d{2}\.\d{4}", md, re.S)
+    m = re.search(r"Описание\s*\*\n+(.+?)\n+\d{2}\.\d{2}\.\d{4}", md, re.S)
     if m:
         desc = " ".join(m.group(1).split())
 
     place = ""
-    m = re.search(r"Расположение\s*\n+(.+)", md)
+    m = re.search(r"Расположение\s*\*\n+(.+)", md)
     if m:
         place = m.group(1).strip()[:60]
 
@@ -143,6 +143,7 @@ def make_caption(sess, d):
         lines.append(d["place"])
     if d["desc"]:
         lines.append(translate(sess, d["desc"][:700]))
+    lines.append("Связаться: " + d["url"])
     return "\n\n".join(x for x in lines if x)[:1024]
 
 def send(sess, d, caption):
@@ -158,10 +159,21 @@ def send(sess, d, caption):
                             "media": json.dumps(media, ensure_ascii=False)},
                       timeout=60)
         print("telegram album:", r.status_code, r.text[:200])
+
+        mid = None
+        try:
+            res = r.json().get("result") or []
+            if res:
+                mid = res[0]["message_id"]
+        except Exception:
+            mid = None
+
+        payload = {"chat_id": CHAT_ID, "text": "Связаться с продавцом",
+                   "reply_markup": json.dumps(markup)}
+        if mid:
+            payload["reply_parameters"] = json.dumps({"message_id": mid})
         r2 = sess.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage",
-                       data={"chat_id": CHAT_ID,
-                             "text": "Связаться с продавцом",
-                             "reply_markup": json.dumps(markup)}, timeout=40)
+                       data=payload, timeout=40)
         print("telegram кнопка:", r2.status_code, r2.text[:200])
         return r.ok and r2.ok
 
@@ -240,9 +252,9 @@ def main():
             st["failed"][path] = st["failed"].get(path, 0) + 1
             if st["failed"][path] < 2:
                 st["queue"].append(path)
-                print("  вернём в конец очереди")
+                print(" вернём в конец очереди")
             else:
-                print("  брошен: не удалось 2 раза")
+                print(" брошен: не удалось 2 раза")
 
     save(st)
 
