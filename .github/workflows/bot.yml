@@ -22,25 +22,24 @@ jobs:
           python-version: "3.12"
 
       - name: Install
-        run: pip install requests
+        run: |
+          pip install requests markdownify playwright
+          python -m playwright install --with-deps chromium
 
       - name: Fix code
         run: |
           perl -0777 -i -pe '
-          s#^(CHAT_ID = os\.environ\.get\("TELEGRAM_CHAT_ID", ""\))$#$1\nJINA_KEY = os.environ.get("JINA_KEY", "")#m unless /^JINA_KEY = /m;
-          s#^(    h = dict\(HDRS\))$#$1\n    if JINA_KEY:\n        h["Authorization"] = "Bearer " + JINA_KEY#m unless /^        h\["Authorization"\]/m;
+          s/\n(main\(\)\s*)$/\nfrom fetcher import jina\n\n$1/m unless /from fetcher import jina/;
+          s#if has_cyr\(alt\):#if has_cyr(alt) and not alt.rstrip().endswith(".") and len(alt.split()) >= 3:# unless /endswith\("."\)/;
           s#ok = bool\(cap\) and send\(sess, d, iid, cap\)#ok = bool(cap) and bool(d["photos"]) and send(sess, d, iid, cap)# unless /bool\(d\["photos"\]\)/;
-          s#if has_cyr\(alt\):#if has_cyr(alt) and not alt.rstrip().endswith(".") and len(alt.split()) >= 3:# unless /endswith\("\."\)/;
-          s#^(    return text)$#    tgt = "https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=ru&dt=t&q=" + requests.utils.quote(text[:1200])\n    try:\n        r = sess.get(JINA + requests.utils.quote(tgt, safe=""), timeout=90)\n        if r.status_code == 200:\n            found = re.findall("[А-Яа-яЁё]+(?:[ ,.:0-9-]*[А-Яа-яЁё0-9]+)*", r.text)\n            cyr = " ".join(found).strip()\n            if len(cyr) > 2:\n                return cyr[:2000]\n    except Exception as e:\n        print("  перевод через Jina:", type(e).__name__)\n    return text#m unless /перевод через Jina/;
           ' bot.py
+          grep -n "from fetcher" bot.py || true
           if python -m py_compile bot.py; then echo "patch ok"; else echo "patch FAILED"; git checkout -- bot.py; fi
-          grep -n "JINA_KEY" bot.py || true
 
       - name: Run bot
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-          JINA_KEY: ${{ secrets.JINA_KEY }}
         run: python bot.py
 
       - name: Save state
