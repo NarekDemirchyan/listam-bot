@@ -27,10 +27,20 @@ jobs:
           s#^(    h = dict\(HDRS\))$#$1\n    if JINA_KEY:\n        h["Authorization"] = "Bearer " + JINA_KEY#m unless /^        h\["Authorization"\]/m;
           s#ok = bool\(cap\) and send\(sess, d, cap\)#ok = bool(cap) and bool(d["photos"]) and send(sess, d, cap)# unless /bool\(d\["photos"\]\)/;
           s#if has_cyr\(alt\):#if has_cyr(alt) and not alt.rstrip().endswith(".") and len(alt.split()) >= 3:# unless /endswith\("\."\)/;
-          s#^(    return text)$#    tgt = "https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=ru&dt=t&q=" + requests.utils.quote(text[:1200])\n    try:\n        r = sess.get(JINA + requests.utils.quote(tgt, safe=""), timeout=90)\n        if r.status_code == 200:\n            found = re.findall("[А-Яа-яЁё]+(?:[ ,.:0-9-]*[А-Яа-яЁё0-9]+)*", r.text)\n            cyr = " ".join(found).strip()\n            if len(cyr) > 2:\n                return cyr[:2000]\n    except Exception as e:\n        print("  перевод через Jina:", type(e).__name__)\n    return text#m unless /перевод через Jina/;
+          s#for attempt in range\(4\):#for attempt in range(2):# unless /for attempt in range\(2\):/;
+          s#time.sleep\(8 \* \(attempt \+ 1\)\)#time.sleep(3 * (attempt + 1))# unless /time.sleep\(3 \* /;
           ' gortsarq.py
           if python -m py_compile gortsarq.py; then echo "patch ok"; else echo "patch FAILED"; git checkout -- gortsarq.py; fi
           grep -n "JINA_KEY" gortsarq.py || true
+
+      - name: Key check
+        env:
+          JINA_KEY: ${{ secrets.JINA_KEY }}
+        run: |
+          echo "key length: ${#JINA_KEY}"
+          echo "key start: ${JINA_KEY:0:5}"
+          curl -s -o /tmp/jina.txt -w "http %{http_code}\n" -H "Authorization: Bearer $JINA_KEY" "https://r.jina.ai/https://example.com"
+          head -c 300 /tmp/jina.txt || true
 
       - name: run
         run: |
