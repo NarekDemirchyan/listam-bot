@@ -13,7 +13,7 @@ concurrency:
 jobs:
   run:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
 
@@ -24,17 +24,24 @@ jobs:
       - name: Install
         run: pip install requests
 
+      - name: Fix code
+        run: |
+          perl -0777 -i -pe 's/^(CHAT_ID = os\.environ\.get\("TELEGRAM_CHAT_ID", ""\))$/$1\nJINA_KEY = os.environ.get("JINA_KEY", "")/m unless /^JINA_KEY = /m; s/^(    h = dict\(HDRS\))$/$1\n    if JINA_KEY:\n        h["Authorization"] = "Bearer " + JINA_KEY/m unless /^        h\["Authorization"\]/m; s/ok = bool\(cap\) and send\(sess, d, iid, cap\)/ok = bool(cap) and bool(d["photos"]) and send(sess, d, iid, cap)/ unless /bool\(d\["photos"\]\)/; s/if has_cyr\(alt\):/if has_cyr(alt) and not alt.rstrip().endswith(".") and len(alt.split()) >= 3:/ unless /endswith\("\."\)/' bot.py
+          python -m py_compile bot.py
+          grep -n "JINA_KEY" bot.py
+
       - name: Run bot
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          JINA_KEY: ${{ secrets.JINA_KEY }}
         run: python bot.py
 
       - name: Save state
         run: |
           git config user.name "github-actions"
           git config user.email "actions@github.com"
-          git add state.json
-          git commit -m "state" || echo "no changes"
+          git add state.json bot.py
+          git commit -m "state + fix" || echo "no changes"
           git pull --rebase --autostash || true
           git push || true
