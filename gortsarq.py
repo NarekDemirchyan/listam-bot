@@ -45,7 +45,7 @@ def jina(sess, url, extra=None):
         h["Authorization"] = "Bearer " + JINA_KEY
     if extra:
         h.update(extra)
-    for attempt in range(4):
+    for attempt in range(2):
         try:
             r = sess.get(JINA + url, headers=h, timeout=60)
             if r.status_code == 200 and not is_blocked(r.text):
@@ -53,7 +53,7 @@ def jina(sess, url, extra=None):
             print(f" jina {r.status_code} / защита, попытка {attempt + 1}")
         except Exception as e:
             print(f" jina ошибка: {type(e).__name__}: {e}")
-        time.sleep(8 * (attempt + 1))
+        time.sleep(3 * (attempt + 1))
     return ""
 
 def translate(sess, text):
