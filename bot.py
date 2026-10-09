@@ -320,4 +320,6 @@ def main():
 
     save(st)
 
+from fetcher import jina
+
 main()
