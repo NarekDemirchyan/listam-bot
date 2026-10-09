@@ -45,7 +45,7 @@ def jina(sess, url, extra=None):
     h = dict(HDRS)
     if extra:
         h.update(extra)
-    for attempt in range(4):
+    for attempt in range(2):
         try:
             r = sess.get(JINA + url, headers=h, timeout=60)
             if r.status_code == 200 and not is_blocked(r.text):
@@ -53,7 +53,7 @@ def jina(sess, url, extra=None):
             print(f" jina {r.status_code} / защита, попытка {attempt + 1}")
         except Exception as e:
             print(f" jina ошибка: {type(e).__name__}: {e}")
-        time.sleep(8 * (attempt + 1))
+        time.sleep(3 * (attempt + 1))
     return ""
 
 def translate(sess, text):
@@ -156,7 +156,7 @@ def headline(sess, d):
     if t and not latin_junk(t):
         return t
     alt = translate(sess, d["desc"][:300]).strip()
-    if has_cyr(alt):
+    if has_cyr(alt) and len(alt.split()) >= 3:
         return re.split(r"[.!?]\s", alt)[0].strip()[:90]
     return ""
 
@@ -292,7 +292,7 @@ def main():
             try:
                 d = item_data(sess, path)
                 cap = make_caption(sess, d) if d else ""
-                ok = bool(cap) and send(sess, d, cap)
+                ok = bool(cap) and bool(d["photos"]) and send(sess, d, cap)
             except Exception as e:
                 print("ошибка публикации:", e)
                 ok = False
@@ -310,5 +310,7 @@ def main():
                 print(f"  брошен {path}: не удалось 2 раза")
 
     save(st)
+
+from fetcher import jina
 
 main()
