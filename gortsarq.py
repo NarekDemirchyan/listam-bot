@@ -12,7 +12,7 @@ STATE = "state-gortsarq.json"
 INTERVAL = 25 * 60          # минимальный промежуток между публикациями (сек)
 QUEUE_MAX = 250             # максимум объявлений в очереди
 FRESH_DAYS = 1              # берём только объявления за последние сутки
-RESET_ONCE = True           # однократный сброс очереди, сработает один раз
+RESET_ONCE = True           # однократный сброс очереди
 TEST = False
 
 JINA = "https://r.jina.ai/"
@@ -45,7 +45,7 @@ def jina(sess, url, extra=None):
     h = dict(HDRS)
     if extra:
         h.update(extra)
-    for attempt in range(2):
+    for attempt in range(4):
         try:
             r = sess.get(JINA + url, headers=h, timeout=60)
             if r.status_code == 200 and not is_blocked(r.text):
@@ -53,7 +53,7 @@ def jina(sess, url, extra=None):
             print(f" jina {r.status_code} / защита, попытка {attempt + 1}")
         except Exception as e:
             print(f" jina ошибка: {type(e).__name__}: {e}")
-        time.sleep(3 * (attempt + 1))
+        time.sleep(8 * (attempt + 1))
     return ""
 
 def translate(sess, text):
@@ -229,7 +229,8 @@ def send(sess, d, caption):
 def load():
     if os.path.exists(STATE):
         return json.load(open(STATE, encoding="utf-8"))
-    return {"seen": [], "queue": [], "last_publish": 0}
+    return {"seen": [], "queue": [], "last_publish": 0,
+            "published": {}, "failed": {}}
 
 def save(st):
     json.dump(st, open(STATE, "w", encoding="utf-8"), ensure_ascii=False)
@@ -239,14 +240,15 @@ def main():
     st.setdefault("failed", {})
     st.setdefault("seen", [])
     st.setdefault("queue", [])
+    st.setdefault("published", {})
     st.setdefault("last_publish", 0)
     sess = requests.Session()
 
-    if RESET_ONCE and not st.get("reset_done"):
+    if RESET_ONCE and not st.get("reset_done2"):
         st["queue"] = []
         st["seen"] = []
         st["failed"] = {}
-        st["reset_done"] = True
+        st["reset_done2"] = True
         print("очистка: очередь и список просмотренных сброшены")
 
     items = get_items(sess)
@@ -262,7 +264,7 @@ def main():
     ok_dates = last_days(FRESH_DAYS)
     fresh = []
     for iid, it in items.items():
-        if iid in st["seen"]:
+        if iid in st["seen"] or iid in st["published"] or it["path"] in st["published"]:
             continue
         st["seen"].append(iid)
         if it["date"] and it["date"] not in ok_dates:
@@ -292,13 +294,14 @@ def main():
             try:
                 d = item_data(sess, path)
                 cap = make_caption(sess, d) if d else ""
-                ok = bool(cap) and bool(d["photos"]) and send(sess, d, cap)
+                ok = bool(cap) and send(sess, d, cap)
             except Exception as e:
                 print("ошибка публикации:", e)
                 ok = False
 
             if ok:
                 st["last_publish"] = now
+                st["published"][path] = now
                 print(f"опубликовано: {path}")
                 break
 
@@ -309,8 +312,10 @@ def main():
             else:
                 print(f"  брошен {path}: не удалось 2 раза")
 
-    save(st)
+    if len(st["published"]) > 50000:
+        keys = list(st["published"])[-20000:]
+        st["published"] = {k: st["published"][k] for k in keys}
 
-from fetcher import jina
+    save(st)
 
 main()
