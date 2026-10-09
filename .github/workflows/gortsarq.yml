@@ -31,16 +31,28 @@ jobs:
           s#time.sleep\(8 \* \(attempt \+ 1\)\)#time.sleep(3 * (attempt + 1))# unless /time.sleep\(3 \* /;
           ' gortsarq.py
           if python -m py_compile gortsarq.py; then echo "patch ok"; else echo "patch FAILED"; git checkout -- gortsarq.py; fi
-          grep -n "JINA_KEY" gortsarq.py || true
 
-      - name: Key check
+      - name: Test
         env:
           JINA_KEY: ${{ secrets.JINA_KEY }}
         run: |
-          echo "key length: ${#JINA_KEY}"
-          echo "key start: ${JINA_KEY:0:5}"
-          curl -s -o /tmp/jina.txt -w "http %{http_code}\n" -H "Authorization: Bearer $JINA_KEY" "https://r.jina.ai/https://example.com"
-          head -c 300 /tmp/jina.txt || true
+          UA="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"
+          echo "== jina =="
+          curl -s -o /tmp/j.txt -w "jina http %{http_code}\n" -H "Authorization: Bearer $JINA_KEY" "https://r.jina.ai/https://example.com"
+          head -c 150 /tmp/j.txt || true
+          echo "== list.am direct =="
+          curl -s -o /tmp/l.txt -w "list.am http %{http_code}\n" -A "$UA" "https://www.list.am/ru/category/4"
+          wc -c < /tmp/l.txt
+          grep -c "Just a moment" /tmp/l.txt || true
+          echo "== gortsarq direct =="
+          curl -s -o /tmp/g.txt -w "gortsarq http %{http_code}\n" -A "$UA" "https://gortsarq.am/ru/265c-2-ansharj-guyq/"
+          wc -c < /tmp/g.txt
+          grep -c "Just a moment" /tmp/g.txt || true
+          echo "== translate direct =="
+          curl -s -o /tmp/t.txt -w "google http %{http_code}\n" -A "$UA" "https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=ru&dt=t&q=hello"
+          head -c 120 /tmp/t.txt || true
+          curl -s -o /tmp/t2.txt -w "clients5 http %{http_code}\n" -A "$UA" "https://clients5.google.com/translate_a/t?client=dict-chrome-ex&sl=auto&tl=ru&q=hello"
+          head -c 120 /tmp/t2.txt || true
 
       - name: run
         run: |
