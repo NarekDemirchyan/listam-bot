@@ -9,11 +9,12 @@ TOKEN    = os.environ.get("TELEGRAM_TOKEN", "")
 CHAT_ID  = os.environ.get("TELEGRAM_CHAT_ID", "")
 JINA_KEY = os.environ.get("JINA_KEY", "")
 
-STATE     = "state.json"
-INTERVAL  = 5 * 60
-FRESH     = 24 * 3600   # публикуем только объявления не старше суток
-QUEUE_MAX = 5000        # максимум записей в очереди
-TEST = False
+STATE      = "state.json"
+INTERVAL   = 18 * 60      # минимальный промежуток между публикациями (сек)
+QUEUE_MAX  = 250          # максимум объявлений в очереди
+RESET_ONCE = True         # однократный сброс очереди, сработает один раз
+RESET_SEED = 40           # сколько свежих объявлений взять из каждого раздела
+TEST       = False
 
 JINA = "https://r.jina.ai/"
 BASE = "https://www.list.am"
@@ -225,19 +226,30 @@ def load():
     if os.path.exists(STATE):
         return json.load(open(STATE, encoding="utf-8"))
     return {"seen": [], "queue": [], "last_publish": 0, "seeded": [],
-            "published": {}, "qtime": {}}
+            "published": {}, "failed": {}}
 
 def save(st):
     json.dump(st, open(STATE, "w", encoding="utf-8"), ensure_ascii=False)
 
 def main():
     st = load()
+    st.setdefault("seen", [])
+    st.setdefault("queue", [])
     st.setdefault("seeded", [])
-    st.setdefault("failed", {})
     st.setdefault("published", {})
-    st.setdefault("qtime", {})
+    st.setdefault("failed", {})
+    st.setdefault("last_publish", 0)
     sess = requests.Session()
     now = time.time()
+
+    first = False
+    if RESET_ONCE and not st.get("reset_done"):
+        st["queue"] = []
+        st["seen"] = []
+        st["failed"] = {}
+        st["reset_done"] = True
+        first = True
+        print("очистка: очередь и список просмотренных сброшены")
 
     by_cat = get_ids(sess)
     total = sum(len(v) for v in by_cat.values())
@@ -251,17 +263,8 @@ def main():
             send(sess, d, flat[0], make_caption(sess, d))
         return
 
-    if not st["seen"]:
-        for cat in by_cat:
-            for iid in by_cat[cat]:
-                if iid not in st["seen"]:
-                    st["seen"].append(iid)
-        save(st)
-        print("первый запуск: всё зарегистрировано, публикаций нет")
-        return
-
-    for cat in by_cat:
-        cat_ids = by_cat[cat]
+    for cat in SECTIONS:
+        cat_ids = by_cat.get(cat, [])
         if cat not in st["seeded"]:
             st["seeded"].append(cat)
             n = SEED.get(cat, 0)
@@ -271,31 +274,27 @@ def main():
                     st["seen"].append(iid)
                 if picked < n and iid not in st["queue"] and iid not in st["published"]:
                     st["queue"].append(iid)
-                    st["qtime"][iid] = now
                     picked += 1
             print(f"новый раздел [{cat}] {SECTIONS[cat]}: в очередь {picked}")
             continue
 
+        taken = 0
         for iid in cat_ids:
-            if iid not in st["seen"]:
-                st["seen"].append(iid)
-                if (iid not in st["queue"] and iid not in st["published"]
-                        and iid not in st["qtime"]):
-                    st["queue"].append(iid)
-                    st["qtime"][iid] = now
+            if iid in st["seen"]:
+                continue
+            st["seen"].append(iid)
+            if iid in st["published"]:
+                continue
+            if first and taken >= RESET_SEED:
+                continue      # при очистке берём только свежие сверху каждого раздела
+            st["queue"].append(iid)
+            taken += 1
 
     st["seen"] = st["seen"][-100000:]
 
-    # убираем устаревшее и уже опубликованное, ограничиваем размер
-    keep = []
-    for iid in st["queue"]:
-        if iid in st["published"]:
-            continue
-        if now - st["qtime"].get(iid, 0) > FRESH:
-            continue
-        keep.append(iid)
-    st["queue"] = keep[-QUEUE_MAX:]
-    st["qtime"] = {i: st["qtime"].get(i, now) for i in st["queue"]}
+    # лишнее уходит с начала очереди, свежие остаются в конце
+    while len(st["queue"]) > QUEUE_MAX:
+        st["queue"].pop(0)
 
     print("очередь:", len(st["queue"]))
 
