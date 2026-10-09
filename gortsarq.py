@@ -7,6 +7,7 @@ import requests
 
 TOKEN = os.environ.get("TELEGRAM_TOKEN", "")
 CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
+JINA_KEY = os.environ.get("JINA_KEY", "")
 
 STATE = "state-gortsarq.json"
 INTERVAL = 5 * 60
@@ -40,6 +41,8 @@ def is_blocked(text):
 
 def jina(sess, url, extra=None):
     h = dict(HDRS)
+    if JINA_KEY:
+        h["Authorization"] = "Bearer " + JINA_KEY
     if extra:
         h.update(extra)
     for attempt in range(4):
@@ -67,6 +70,16 @@ def translate(sess, text):
             return res
     except Exception as e:
         print(" перевод недоступен:", type(e).__name__)
+    tgt = "https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=ru&dt=t&q=" + requests.utils.quote(text[:1200])
+    try:
+        r = sess.get(JINA + requests.utils.quote(tgt, safe=""), timeout=90)
+        if r.status_code == 200:
+            found = re.findall("[А-Яа-яЁё]+(?:[ ,.:0-9-]*[А-Яа-яЁё0-9]+)*", r.text)
+            cyr = " ".join(found).strip()
+            if len(cyr) > 2:
+                return cyr[:2000]
+    except Exception as e:
+        print("  перевод через Jina:", type(e).__name__)
     return text
 
 def has_cyr(s):
@@ -140,7 +153,7 @@ def headline(sess, d):
     if t and not latin_junk(t):
         return t
     alt = translate(sess, d["desc"][:300]).strip()
-    if has_cyr(alt):
+    if has_cyr(alt) and not alt.rstrip().endswith(".") and len(alt.split()) >= 3:
         return re.split(r"[.!?]\s", alt)[0].strip()[:90]
     return ""
 
@@ -266,7 +279,7 @@ def main():
             try:
                 d = item_data(sess, path)
                 cap = make_caption(sess, d) if d else ""
-                ok = bool(cap) and send(sess, d, cap)
+                ok = bool(cap) and bool(d["photos"]) and send(sess, d, cap)
             except Exception as e:
                 print("ошибка публикации:", e)
                 ok = False
