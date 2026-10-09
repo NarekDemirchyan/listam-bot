@@ -290,7 +290,7 @@ def main():
                 st["seen"].append(iid)
                 st["queue"].append(iid)
 
-    st["seen"] = st["seen"][-5000:]
+    st["seen"] = st["seen"][-100000:]
     now = time.time()
     print("очередь:", len(st["queue"]))
 
