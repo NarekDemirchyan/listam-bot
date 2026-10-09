@@ -18,6 +18,15 @@ def _start():
             args=["--disable-blink-features=AutomationControlled", "--no-sandbox"])
     return _browser
 
+def _title(page):
+    try:
+        t = page.locator("h1")
+        if t.count():
+            return " ".join(t.first.inner_text().split())
+    except Exception:
+        pass
+    return " ".join(page.title().split())
+
 def jina(sess, url, extra=None):
     want_html = bool(extra and extra.get("x-respond-with") == "html")
     for attempt in range(2):
@@ -33,7 +42,7 @@ def jina(sess, url, extra=None):
                     break
                 page.wait_for_timeout(2000)
                 html = page.content()
-            title = page.title()
+            title = _title(page)
             ctx.close()
             if len(html) < 3000:
                 print("  browser пусто, попытка", attempt + 1)
@@ -42,7 +51,7 @@ def jina(sess, url, extra=None):
                 return html
             md = markdownify(html, heading_style="ATX",
                              strip=["script", "style", "noscript", "svg"])
-            return "# " + title.strip() + "\n\n" + md
+            return "# " + title + "\n\n" + md
         except Exception as e:
             print("  browser ошибка:", type(e).__name__, str(e)[:150])
             try:
