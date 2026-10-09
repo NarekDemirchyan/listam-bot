@@ -5,17 +5,21 @@ import json
 import time
 import requests
 
-TOKEN   = os.environ.get("TELEGRAM_TOKEN", "")
-CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
+TOKEN    = os.environ.get("TELEGRAM_TOKEN", "")
+CHAT_ID  = os.environ.get("TELEGRAM_CHAT_ID", "")
 JINA_KEY = os.environ.get("JINA_KEY", "")
 
-STATE    = "state.json"
-INTERVAL = 5 * 60
+STATE     = "state.json"
+INTERVAL  = 5 * 60
+FRESH     = 24 * 3600   # публикуем только объявления не старше суток
+QUEUE_MAX = 5000        # максимум записей в очереди
 TEST = False
 
 JINA = "https://r.jina.ai/"
 BASE = "https://www.list.am"
 HDRS = {"User-Agent": "curl/8.5.0"}
+if JINA_KEY:
+    HDRS["Authorization"] = "Bearer " + JINA_KEY
 
 SECTIONS = {
     "4":   "Электроника",
@@ -32,20 +36,15 @@ PHOTO_RE = re.compile(
     r"(https?:)?//img\.list\.am/([a-z]+)/\d+/(\d+)\.(?:webp|jpg|jpeg|png)",
     re.I)
 
-# --- защита от "Just a moment" -------------------------------------------
-
 BLOCKED = ("just a moment", "attention required", "enable javascript",
            "checking your browser", "cloudflare")
 
 def is_blocked(text):
-    """True, если вместо страницы вернулась защита или пустышка."""
     t = (text or "").strip()
     return len(t) < 800 or any(m in t.lower() for m in BLOCKED)
 
 def jina(sess, url, extra=None):
     h = dict(HDRS)
-    if JINA_KEY:
-        h["Authorization"] = "Bearer " + JINA_KEY
     if extra:
         h.update(extra)
     for attempt in range(4):
@@ -60,7 +59,6 @@ def jina(sess, url, extra=None):
     return ""
 
 def collect_photos(text):
-    """Уникальные фото; при наличии берём полный размер (f)."""
     out = {}
     for m in PHOTO_RE.finditer(text):
         kind, pid, url = m.group(2).lower(), m.group(3), m.group(0)
@@ -84,35 +82,23 @@ def translate(sess, text):
             return res
     except Exception as e:
         print("  перевод недоступен:", type(e).__name__)
-    tgt = "https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=ru&dt=t&q=" + requests.utils.quote(text[:1200])
-    try:
-        r = sess.get(JINA + requests.utils.quote(tgt, safe=""), timeout=90)
-        if r.status_code == 200:
-            found = re.findall("[А-Яа-яЁё]+(?:[ ,.:0-9-]*[А-Яа-яЁё0-9]+)*", r.text)
-            cyr = " ".join(found).strip()
-            if len(cyr) > 2:
-                return cyr[:2000]
-    except Exception as e:
-        print("  перевод через Jina:", type(e).__name__)
     return text
 
 def has_cyr(s):
     return bool(re.search(r"[А-Яа-яЁё]", s or ""))
 
 def latin_junk(t):
-    """Латинский заголовок: короткий (бренд) — ок, длинный транслит — мусор."""
     t = (t or "").strip()
     if not t or has_cyr(t):
         return False
     return len(t.split()) > 2
 
 def headline(sess, d):
-    """Русская строка-заголовок. Пусто — публиковать нечего."""
     t = translate(sess, d["title"]).strip()
     if t and not latin_junk(t):
         return t
     alt = translate(sess, d["desc"][:300]).strip()
-    if has_cyr(alt) and not alt.rstrip().endswith(".") and len(alt.split()) >= 3:
+    if has_cyr(alt):
         return re.split(r"[.!?]\s", alt)[0].strip()[:90]
     return ""
 
@@ -219,7 +205,7 @@ def send(sess, d, iid, caption):
         r2 = sess.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage",
                        data=payload, timeout=40)
         print("telegram кнопка:", r2.status_code, r2.text[:200])
-        return r.ok and r2.ok
+        return r.ok
 
     payload = {"chat_id": CHAT_ID, "reply_markup": json.dumps(markup)}
     if photos:
@@ -238,7 +224,8 @@ def send(sess, d, iid, caption):
 def load():
     if os.path.exists(STATE):
         return json.load(open(STATE, encoding="utf-8"))
-    return {"seen": [], "queue": [], "last_publish": 0, "seeded": []}
+    return {"seen": [], "queue": [], "last_publish": 0, "seeded": [],
+            "published": {}, "qtime": {}}
 
 def save(st):
     json.dump(st, open(STATE, "w", encoding="utf-8"), ensure_ascii=False)
@@ -247,7 +234,10 @@ def main():
     st = load()
     st.setdefault("seeded", [])
     st.setdefault("failed", {})
+    st.setdefault("published", {})
+    st.setdefault("qtime", {})
     sess = requests.Session()
+    now = time.time()
 
     by_cat = get_ids(sess)
     total = sum(len(v) for v in by_cat.values())
@@ -279,8 +269,9 @@ def main():
             for iid in cat_ids:
                 if iid not in st["seen"]:
                     st["seen"].append(iid)
-                if picked < n:
+                if picked < n and iid not in st["queue"] and iid not in st["published"]:
                     st["queue"].append(iid)
+                    st["qtime"][iid] = now
                     picked += 1
             print(f"новый раздел [{cat}] {SECTIONS[cat]}: в очередь {picked}")
             continue
@@ -288,15 +279,27 @@ def main():
         for iid in cat_ids:
             if iid not in st["seen"]:
                 st["seen"].append(iid)
-                st["queue"].append(iid)
+                if (iid not in st["queue"] and iid not in st["published"]
+                        and iid not in st["qtime"]):
+                    st["queue"].append(iid)
+                    st["qtime"][iid] = now
 
     st["seen"] = st["seen"][-100000:]
-    now = time.time()
+
+    # убираем устаревшее и уже опубликованное, ограничиваем размер
+    keep = []
+    for iid in st["queue"]:
+        if iid in st["published"]:
+            continue
+        if now - st["qtime"].get(iid, 0) > FRESH:
+            continue
+        keep.append(iid)
+    st["queue"] = keep[-QUEUE_MAX:]
+    st["qtime"] = {i: st["qtime"].get(i, now) for i in st["queue"]}
+
     print("очередь:", len(st["queue"]))
 
     if st["queue"] and now - st["last_publish"] >= INTERVAL:
-        # до трёх попыток в одном слоте: если объявление не вышло,
-        # сразу берём следующее из очереди, чтобы время не пропадало
         for _ in range(3):
             if not st["queue"]:
                 break
@@ -305,21 +308,28 @@ def main():
             try:
                 d = item_data(sess, iid)
                 cap = make_caption(sess, d)
-                ok = bool(cap) and bool(d["photos"]) and send(sess, d, iid, cap)
+                ok = bool(cap) and send(sess, d, iid, cap)
             except Exception as e:
                 print("ошибка публикации:", e)
                 ok = False
 
             if ok:
                 st["last_publish"] = now
+                st["published"][iid] = now
                 print(f"опубликовано: {iid}")
                 break
 
             st["failed"][iid] = st["failed"].get(iid, 0) + 1
-            print(f"  убран из очереди: {iid}")
+            if st["failed"][iid] < 2 and iid not in st["published"]:
+                st["queue"].append(iid)
+                print(f"  вернём в конец очереди: {iid}")
+            else:
+                print(f"  брошен {iid}: не удалось 2 раза")
+
+    if len(st["published"]) > 50000:
+        keys = list(st["published"])[-20000:]
+        st["published"] = {k: st["published"][k] for k in keys}
 
     save(st)
-
-from fetcher import jina
 
 main()
