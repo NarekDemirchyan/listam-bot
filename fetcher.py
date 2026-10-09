@@ -1,11 +1,11 @@
 # -*- coding: utf-8 -*-
-"""Էջերի ընթերցիչ առանց Jina-ի. բացում է էջը իսկական դիտարկիչով (Playwright)
-ու վերադարձնում markdown, կամ ուղիղ HTML, եթե բոտը ուզում է x-respond-with=html."""
+"""Ընթերցիչ առանց Jina-ի. էջը բացում է իսկական Chrome-ով (Playwright) ու վերադարձնում
+markdown, կամ ուղիղ HTML, եթե extra-ում x-respond-with=html է։ Ստորագրությունը նույնն է,
+ինչ հին jina()-ը, դրա համար բոտի մնացած կոդը մնում է անփոփոխ։"""
 from markdownify import markdownify
 
 UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
       "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
-
 _pw = None
 _browser = None
 
@@ -19,7 +19,6 @@ def _start():
     return _browser
 
 def jina(sess, url, extra=None):
-    """Բոտերի համար նույն ստորագրությամբ փոխարինող ընթերցիչ."""
     want_html = bool(extra and extra.get("x-respond-with") == "html")
     for attempt in range(2):
         ctx = None
