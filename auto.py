@@ -4,17 +4,19 @@ import os, re, json, time, requests
 TOKEN   = os.environ.get("TELEGRAM_TOKEN", "")
 CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID_AUTO", "")
 
-STATE     = "state_auto.json"
-INTERVAL  = 18 * 60      # как часто публиковать (сек)
-SEED      = 30           # сколько объявлений поставить в очередь при первом запуске
-MAX_QUEUE = 1000
-TEST      = False
+STATE      = "state_auto.json"
+INTERVAL   = 12 * 60      # минимальный промежуток между публикациями (сек)
+QUEUE_MAX  = 250          # максимум объявлений в очереди
+FRESH_DAYS = 1            # берём только объявления за последние сутки
+RESET_ONCE = True         # однократный сброс очереди, сработает один раз
+TEST       = False
 
 JINA = "https://r.jina.ai/"
 BASE = "https://auto.am"
 SITEMAPS = [f"{BASE}/sitemaps/offers-{i}.xml" for i in range(1, 11)]
 HDRS = {"User-Agent": "curl/8.5.0"}
 
+DATE_RE = re.compile(r"<lastmod>(\d{4}-\d{2}-\d{2})")
 BLOCKED = ("just a moment", "attention required", "enable javascript",
            "checking your browser", "cloudflare")
 
@@ -38,7 +40,6 @@ def jina(sess, url, extra=None):
     return ""
 
 def fetch_sitemap(sess, url):
-    """XML берём напрямую, при неудаче — через Jina."""
     try:
         r = sess.get(url, headers=HDRS, timeout=60)
         if r.status_code == 200 and "<urlset" in r.text:
@@ -46,6 +47,14 @@ def fetch_sitemap(sess, url):
     except Exception as e:
         print("  sitemap ошибка:", type(e).__name__)
     return jina(sess, url)
+
+def last_days(n):
+    # даты сайта (ГГГГ-ММ-ДД) за последние n суток по Еревану (UTC+4)
+    out = set()
+    base = time.time() + 4 * 3600
+    for k in range(n + 1):
+        out.add(time.strftime("%Y-%m-%d", time.gmtime(base - k * 24 * 3600)))
+    return out
 
 def translate(sess, text):
     text = (text or "").strip()
@@ -66,15 +75,24 @@ def has_cyr(s):
     return bool(re.search(r"[А-Яа-яЁё]", s or ""))
 
 def get_ids(sess):
-    ids = []
+    """Список (id, дата последнего изменения) из sitemap."""
+    items = []
+    seen = set()
     for sm in SITEMAPS:
         xml = fetch_sitemap(sess, sm)
-        for i in re.findall(r"auto\.am/(?:ru/|en/)?offer/(\d+)", xml):
-            if i not in ids:
-                ids.append(i)
-        print(f"  {sm.rsplit('/', 1)[-1]}: всего {len(ids)} объявлений")
+        for block in re.findall(r"<url>(.*?)</url>", xml, re.S):
+            m = re.search(r"auto\.am/(?:ru/|en/)?offer/(\d+)", block)
+            if not m:
+                continue
+            iid = m.group(1)
+            if iid in seen:
+                continue
+            seen.add(iid)
+            d = DATE_RE.search(block)
+            items.append((iid, d.group(1) if d else ""))
+        print(f"  {sm.rsplit('/', 1)[-1]}: всего {len(items)} объявлений")
         time.sleep(5)
-    return ids
+    return items
 
 def collect_photos(md, iid):
     urls = re.findall(
@@ -159,7 +177,7 @@ def make_caption(sess, d):
         lines.append(d["where"])
     desc = d["desc"]
     if desc and not has_cyr(desc):
-        desc = translate(sess, desc) if len(desc) >= 60 else ""
+        desc = translate(sess, desc)
     if desc:
         lines.append(desc)
     if d["phone"]:
@@ -199,32 +217,46 @@ def save(st):
 
 def main():
     st = load()
+    st.setdefault("seen", [])
+    st.setdefault("queue", [])
     st.setdefault("failed", {})
+    st.setdefault("last_publish", 0)
     sess = requests.Session()
 
-    ids = get_ids(sess)
-    print("всего объявлений в sitemap:", len(ids))
+    if RESET_ONCE and not st.get("reset_done"):
+        st["queue"] = []
+        st["seen"] = []
+        st["failed"] = {}
+        st["reset_done"] = True
+        print("очистка: очередь и список просмотренных сброшены")
+
+    items = get_ids(sess)
+    print("всего объявлений в sitemap:", len(items))
 
     if TEST:
-        if ids:
-            d = item_data(sess, ids[0])
+        if items:
+            d = item_data(sess, items[0][0])
             send(sess, d, make_caption(sess, d))
         return
 
-    if not st["seen"]:
-        st["seen"] = ids[:]
-        st["queue"] = ids[-SEED:]
-        save(st)
-        print(f"первый запуск: в очередь {len(st['queue'])}, публикаций нет")
-        return
-
-    for iid in ids:
-        if iid not in st["seen"]:
-            st["seen"].append(iid)
-            st["queue"].append(iid)
+    ok_dates = last_days(FRESH_DAYS)
+    fresh = []
+    for iid, date in items:
+        if iid in st["seen"]:
+            continue
+        st["seen"].append(iid)
+        if date and date not in ok_dates:
+            continue                   # старше суток — не берём вовсе
+        fresh.append(iid)
 
     st["seen"] = st["seen"][-20000:]
-    st["queue"] = st["queue"][-MAX_QUEUE:]
+
+    if fresh:
+        st["queue"].extend(fresh)
+        print("новых в очередь:", len(fresh))
+        while len(st["queue"]) > QUEUE_MAX:
+            st["queue"].pop(0)
+
     now = time.time()
     print("очередь:", len(st["queue"]))
 
