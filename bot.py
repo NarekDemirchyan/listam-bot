@@ -98,7 +98,7 @@ def headline(sess, d):
     if t and not latin_junk(t):
         return t
     alt = translate(sess, d["desc"][:300]).strip()
-    if has_cyr(alt):
+    if has_cyr(alt) and not alt.rstrip().endswith(".") and len(alt.split()) >= 3:
         return re.split(r"[.!?]\s", alt)[0].strip()[:90]
     return ""
 
@@ -308,7 +308,7 @@ def main():
             try:
                 d = item_data(sess, iid)
                 cap = make_caption(sess, d)
-                ok = bool(cap) and send(sess, d, iid, cap)
+                ok = bool(cap) and bool(d["photos"]) and send(sess, d, iid, cap)
             except Exception as e:
                 print("ошибка публикации:", e)
                 ok = False
@@ -331,5 +331,7 @@ def main():
         st["published"] = {k: st["published"][k] for k in keys}
 
     save(st)
+
+from fetcher import jina
 
 main()
