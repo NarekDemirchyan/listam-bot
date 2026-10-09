@@ -210,7 +210,8 @@ def send(sess, d, caption):
 def load():
     if os.path.exists(STATE):
         return json.load(open(STATE, encoding="utf-8"))
-    return {"seen": [], "queue": [], "last_publish": 0}
+    return {"seen": [], "queue": [], "last_publish": 0,
+            "published": {}, "failed": {}}
 
 def save(st):
     json.dump(st, open(STATE, "w", encoding="utf-8"), ensure_ascii=False)
@@ -220,15 +221,13 @@ def main():
     st.setdefault("seen", [])
     st.setdefault("queue", [])
     st.setdefault("failed", {})
+    st.setdefault("published", {})
     st.setdefault("last_publish", 0)
     sess = requests.Session()
 
     if RESET_ONCE and not st.get("reset_done"):
-        st["queue"] = []
-        st["seen"] = []
-        st["failed"] = {}
         st["reset_done"] = True
-        print("очистка: очередь и список просмотренных сброшены")
+        print("первый запуск новой версии")
 
     items = get_ids(sess)
     print("всего объявлений в sitemap:", len(items))
@@ -242,7 +241,7 @@ def main():
     ok_dates = last_days(FRESH_DAYS)
     fresh = []
     for iid, date in items:
-        if iid in st["seen"]:
+        if iid in st["seen"] or iid in st["published"]:
             continue
         st["seen"].append(iid)
         if date and date not in ok_dates:
@@ -274,6 +273,7 @@ def main():
                 print("ошибка публикации:", e)
             if ok:
                 st["last_publish"] = now
+                st["published"][iid] = now
                 print("опубликовано:", iid)
                 break
             st["failed"][iid] = st["failed"].get(iid, 0) + 1
@@ -282,6 +282,10 @@ def main():
                 print("  вернём в конец очереди:", iid)
             else:
                 print("  брошен", iid)
+
+    if len(st["published"]) > 50000:
+        keys = list(st["published"])[-20000:]
+        st["published"] = {k: st["published"][k] for k in keys}
 
     save(st)
 
