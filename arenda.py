@@ -26,6 +26,8 @@ TEL_RE    = re.compile(r"tel:([+\d][\d\s\-\(\)]{6,})")
 TITLE_RE  = re.compile(r"((?:Снять|Аренда|Сдается|Сдаётся|Վարձով)[^\n]{5,140}квартир[^\n]{0,90})")
 AREA_RE   = re.compile(r"(\d{2,4})\s*(?:Кв\.?\s*м|քմ|ք\.մ)")
 FLOOR_RE  = re.compile(r"(\d{1,3})\s*/\s*(\d{1,3})\s*(?:Этаж|этаж|հարկ)")
+LABELS    = ("Сан узел", "Тип постройки", "Высота потолка", "Состояние", "Мебель",
+             "Балкон", "Отопление", "Год постройки", "Площадь", "Комнат")
 GENERIC   = ("КВАРТИРЫ", "ОСОБНЯКИ", "ДОМА", "АРЕНДА", "ОФИСЫ", "ПРОДАЖА", "НОВОСТРОЙКИ")
 
 def fetch(sess, url, extra=None):
@@ -62,6 +64,11 @@ def is_generic(t):
     t = (t or "").strip()
     return (not t) or (t.upper() in GENERIC) or (t.isupper() and len(t.split()) <= 2)
 
+def clean_title(t):
+    t = re.sub(r"\s*\|\s*[^|]{0,40}$", "", t or "").strip()
+    t = re.sub(r"[,|]?\s*\d{5,9}\s*$", "", t).strip()
+    return t.strip(" ,|-–—")
+
 def translate(sess, text):
     text = (text or "").strip()
     if not text:
@@ -87,6 +94,20 @@ def collect_photos(*texts):
             if u not in out:
                 out.append(u)
     return out[:10]
+
+def features(md):
+    lines = [l.strip().lstrip("#* ").strip() for l in md.split("\n")]
+    out = []
+    for i, line in enumerate(lines):
+        for lab in LABELS:
+            if line == lab or line.startswith(lab):
+                val = line[len(lab):].strip(" :|–—-").strip()
+                if not val and i + 1 < len(lines):
+                    val = lines[i + 1].strip(" |–—-").strip()
+                if val and 1 <= len(val) <= 45 and lab not in " | ".join(out):
+                    out.append(lab + ": " + val)
+                break
+    return out[:8]
 
 def add(st, src, key, url, found):
     found.append((src, key, url))
@@ -152,11 +173,11 @@ def item_data(sess, url):
     title = ""
     m = re.search(r"^#\s+(.+)$", md, re.M)
     if m:
-        title = m.group(1).strip()
+        title = clean_title(m.group(1))
     if is_generic(title):
         m = TITLE_RE.search(md)
         if m:
-            title = m.group(1).strip()
+            title = clean_title(m.group(1))
     if is_generic(title):
         rooms = re.search(r"/(\d+)-komnatnaya/", url)
         base = "Аренда"
@@ -164,7 +185,7 @@ def item_data(sess, url):
             base += " " + rooms.group(1) + "-комнатной квартиры"
         if place:
             base += ", " + place
-        title = base
+        title = clean_title(base)
 
     feats = []
     m = AREA_RE.search(md)
@@ -173,6 +194,9 @@ def item_data(sess, url):
     m = FLOOR_RE.search(md)
     if m:
         feats.append("этаж " + m.group(1) + "/" + m.group(2))
+    for f in features(md):
+        if f.split(":")[0] not in " | ".join(feats):
+            feats.append(f)
 
     price = ""
     m = PRICE_RE.search(md)
@@ -215,11 +239,16 @@ def make_caption(sess, d):
     return "\n\n".join(x for x in lines if x)[:1024]
 
 def send(sess, d, caption):
-    markup = {"inline_keyboard": [[{"text": "Связаться", "url": d["url"]}]]}
     photo_list = d["photos"]
+    markup = None
+    if not d["phone"]:
+        markup = {"inline_keyboard": [[{"text": "Открыть объявление", "url": d["url"]}]]}
     if len(photo_list) >= 2:
-        media = [{"type": "photo", "media": photo_list[0], "caption": caption,
-                  "parse_mode": "HTML"}]
+        first = {"type": "photo", "media": photo_list[0],
+                 "caption": caption, "parse_mode": "HTML"}
+        if markup:
+            first["reply_markup"] = markup
+        media = [first]
         for p in photo_list[1:10]:
             media.append({"type": "photo", "media": p})
         r = sess.post(f"https://api.telegram.org/bot{TOKEN}/sendMediaGroup",
@@ -227,29 +256,18 @@ def send(sess, d, caption):
                             "media": json.dumps(media, ensure_ascii=False)}, timeout=60)
         print("ալբոմ՝", r.status_code, r.text[:200])
         if not r.ok:
+            payload = {"chat_id": CHAT_ID, "photo": photo_list[0],
+                       "caption": caption, "parse_mode": "HTML"}
+            if markup:
+                payload["reply_markup"] = json.dumps(markup)
             r1 = sess.post(f"https://api.telegram.org/bot{TOKEN}/sendPhoto",
-                           data={"chat_id": CHAT_ID, "photo": photo_list[0],
-                                 "caption": caption, "parse_mode": "HTML",
-                                 "reply_markup": json.dumps(markup)}, timeout=40)
+                           data=payload, timeout=40)
             print("մեկ նկարով՝", r1.status_code, r1.text[:200])
             return r1.ok
-        mid = None
-        try:
-            res = r.json().get("result") or []
-            if res:
-                mid = res[0]["message_id"]
-        except Exception:
-            mid = None
-        payload = {"chat_id": CHAT_ID, "text": "Связаться с арендодателем",
-                   "reply_markup": json.dumps(markup)}
-        if mid:
-            payload["reply_parameters"] = json.dumps({"message_id": mid})
-        r2 = sess.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage",
-                       data=payload, timeout=40)
-        print("կոճակ՝", r2.status_code, r2.text[:200])
         return r.ok
-    payload = {"chat_id": CHAT_ID, "parse_mode": "HTML",
-               "reply_markup": json.dumps(markup)}
+    payload = {"chat_id": CHAT_ID, "parse_mode": "HTML"}
+    if markup:
+        payload["reply_markup"] = json.dumps(markup)
     if photo_list:
         payload["photo"] = photo_list[0]
         payload["caption"] = caption
@@ -291,7 +309,7 @@ def main():
         if pick:
             d = item_data(sess, pick["url"])
             cap = make_caption(sess, d)
-            print("caption՝", cap[:300])
+            print("caption՝", cap[:400])
             if send(sess, d, cap):
                 st["published"][pick["key"]] = now
                 st["last_publish"] = now
