@@ -27,6 +27,7 @@ TEL_RE    = re.compile(r"tel:([+\d][\d\s\-\(\)]{6,})")
 TITLE_RE  = re.compile(r"((?:Снять|Аренда|Сдается|Сдаётся|Վարձով)[^\n]{5,140}квартир[^\n]{0,90})")
 AREA_RE   = re.compile(r"(\d{2,4})\s*(?:Кв\.?\s*м|քմ|ք\.մ)", re.I)
 FLOOR_RE  = re.compile(r"(\d{1,3})\s*/\s*(\d{1,3})\s*(?:Этаж|этаж|հարկ)", re.I)
+BAD_DESC  = re.compile(r"breadcrumb|chevron|\.svg|!\[|\]\(|https?://|©|Все права", re.I)
 LABELS    = ("Общая площадь", "Жилая площадь", "Площадь кухни", "Площадь", "Высота потолков",
              "Высота потолка", "Этажей в доме", "Этажность", "Этаж", "Количество комнат",
              "Комнаты", "Комнат", "Количество санузлов", "Сан узлы", "Сан узел", "Год постройки",
@@ -158,8 +159,13 @@ def features(md):
             break
     return out[:12]
 
+def md_text(t):
+    t = re.sub(r"!\[[^\]]*\]\([^)]*\)", " ", t or "")
+    t = re.sub(r"\[([^\]]*)\]\([^)]*\)", r"\1", t)
+    return re.sub(r"[ \t]+", " ", t).strip()
+
 def find_desc(md):
-    paras = [p.strip() for p in re.split(r"\n\s*\n", md)]
+    paras = [md_text(p) for p in re.split(r"\n\s*\n", md)]
     st_i = None
     for i, p in enumerate(paras):
         if re.match(r"^#*\s*Описание\b", p):
@@ -173,7 +179,7 @@ def find_desc(md):
             if re.match(r"^(Похожие|Номер объявления|Пожаловаться|Переведено|"
                         r"Информация о недвижимости|Контакты|Телефон|Комиссия|Предоплата|Цена|Оплата)", p):
                 break
-            if len(p) < 40 or re.match(r"^#+\s", p):
+            if len(p) < 80 or len(p.split()) < 10 or BAD_DESC.search(p):
                 if chunks:
                     break
                 continue
@@ -181,11 +187,14 @@ def find_desc(md):
             if len(" ".join(chunks)) > 600:
                 break
     if not chunks:
-        longs = [p for p in paras if 150 <= len(p) <= 1000 and len(p.split()) >= 15
-                 and not re.search(r"http|©|list\.am|myrealty", p, re.I)]
+        longs = [p for p in paras if 150 <= len(p) <= 1200 and len(p.split()) >= 25
+                 and not BAD_DESC.search(p) and not re.match(r"^[\W\d\s]+$", p)]
         if longs:
             chunks = [max(longs, key=len)]
-    return " ".join(" ".join(chunks).split())
+    desc = " ".join(" ".join(chunks).split())
+    if len(desc.split()) < 10 or BAD_DESC.search(desc):
+        return ""
+    return desc
 
 def add(st, src, key, url, found):
     found.append((src, key, url))
@@ -287,7 +296,7 @@ def item_data(sess, url):
         num, cur = m.group(1).strip(), m.group(2)
         price = (num + " $/мес") if cur.lower() in ("месяц", "ամիս") else (num + " " + cur).strip()
 
-    desc = clean_text(find_desc(md))
+    desc = find_desc(md)
     if desc and similar(desc, title):
         desc = ""
 
