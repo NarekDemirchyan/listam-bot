@@ -81,10 +81,18 @@ def fetch(sess, url, extra=None):
             if r.status_code == 200 and len(t) > 800 and "just a moment" not in t.lower():
                 print("  jina-ընթերցիչ՝", len(t), url[:70])
                 return t
-            print("  jina-ընթերցիչ ձախողվեց՝", r.status_code, len(t))
         except Exception as e:
             print("  jina սխալ՝", type(e).__name__)
     return md
+
+def html_to_text(h):
+    h = re.sub(r"(?is)<(script|style|noscript)[^>]*>.*?</\1>", " ", h or "")
+    h = re.sub(r"(?is)<br\s*/?>|</(?:p|div|li|tr|h\d|span|td)>", "\n", h)
+    h = re.sub(r"(?s)<[^>]+>", " ", h)
+    for a, b in (("&nbsp;", " "), ("&amp;", "&"), ("&#039;", "'"), ("&quot;", '"'), ("&laquo;", "«"), ("&raquo;", "»")):
+        h = h.replace(a, b)
+    h = re.sub(r"[ \t]+", " ", h)
+    return re.sub(r"\n{2,}", "\n", h).strip()
 
 def esc(s):
     return (s or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
@@ -276,7 +284,7 @@ def find_desc(md):
             q = q.strip()
             if not q:
                 continue
-            if re.match(r"^(Похожие|Номер объявления|Пожаловаться|Переведено|История цены|"
+            if re.match(r"^(Похожие|Номер объявления|Пожаловаться|Переведено|История цены|Код |"
                         r"Информация о недвижимости|Контакты|Телефон|Комиссия|Предоплата|Цена|Оплата)", q):
                 break
             if len(q) < 40 or re.match(r"^#+\s", q) or BAD_DESC.search(q):
@@ -337,12 +345,18 @@ def collect(sess, st):
 
 def item_data(sess, url):
     md = fetch(sess, url)
+    html = fetch(sess, url, {"x-respond-with": "html"})
+    if len(md) < 800 and len(html) < 800:
+        print("  ԽՆԴԻՐ՝ էջը չի բացվում (", url, ")")
+        return None
+    if len(md) < 800:
+        md = html_to_text(html)
+        print("  markdown չեկավ, աշխատում եմ HTML-ով՝", len(md))
     md_cut = md
     for cut in ("Похожие объявления", "Выберите ваш язык", "Пожаловаться", "archive-index"):
         i = md_cut.find(cut)
         if i > 0:
             md_cut = md_cut[:i]
-    html = fetch(sess, url, {"x-respond-with": "html"})
     photo_list = collect_photos(md_cut, html)
 
     place = ""
@@ -410,6 +424,9 @@ def item_data(sess, url):
           f"գին {price!r}, քարտ {vals}, հեռախոս {phone or 'ոչ'}, նկարագրություն {len(desc)}")
     return {"title": title, "price": price, "desc": desc, "place": place,
             "specs": vals, "phone": phone, "photos": photo_list, "url": url}
+
+def is_empty(d):
+    return not d["photos"] and not d["specs"] and not d["price"] and not d["desc"]
 
 def card_block(d):
     v = d["specs"]
@@ -510,6 +527,25 @@ def load():
 def save(st):
     json.dump(st, open(STATE, "w", encoding="utf-8"), ensure_ascii=False)
 
+def pick_and_post(sess, st):
+    """Վերցնում է հերթից, փորձում մինչև 3 հայտարարություն։ Վերադարձնում է (ok, src)։"""
+    for _ in range(3):
+        if not st["queue"]:
+            return False, ""
+        it = st["queue"].pop(0)
+        src = it["src"]
+        d = item_data(sess, it["url"])
+        if d is None or is_empty(d):
+            print("  բաց թողնվեց (դատարկ էջ)՝", it["key"])
+            continue
+        cap = make_caption(sess, d)
+        if cap and send(sess, d, cap):
+            st["published"][it["key"]] = time.time()
+            print("հրապարակվեց՝", it["key"])
+            return True, src
+        continue
+    return False, ""
+
 def main():
     st = load()
     for k, v in (("seen", []), ("queue", []), ("published", {}), ("failed", {}), ("turn", 0)):
@@ -524,49 +560,32 @@ def main():
     print("հերթում՝", len(st["queue"]))
 
     if TEST:
-        pick = st["queue"].pop(0) if st["queue"] else None
-        if pick is None and found:
-            s, k, u = found[0]
-            pick = {"src": s, "key": k, "url": u}
-        if pick:
-            d = item_data(sess, pick["url"])
-            cap = make_caption(sess, d)
-            print("caption՝", cap[:500])
-            if send(sess, d, cap):
-                st["published"][pick["key"]] = now
-                st["last_publish"] = now
+        if pick_and_post(sess, st)[0]:
+            st["last_publish"] = now
         save(st)
         return
 
     if st["queue"] and now - st["last_publish"] >= INTERVAL:
         want = ORDER[st["turn"] % len(ORDER)]
-        for _ in range(3):
-            if not st["queue"]:
-                break
-            idx = next((k for k, it in enumerate(st["queue"]) if it["src"] == want), 0)
-            it = st["queue"].pop(idx)
-            ok = False
-            try:
-                d = item_data(sess, it["url"])
-                if not d["photos"] and not d["specs"] and not d["price"]:
-                    print("  դատարկ էջ՝", it["key"])
-                else:
-                    cap = make_caption(sess, d)
-                    ok = bool(cap) and send(sess, d, cap)
-            except Exception as e:
-                print("հրապարակման սխալ՝", e)
-            if ok:
+        idx = next((k for k, it in enumerate(st["queue"]) if it["src"] == want), 0)
+        it = st["queue"].pop(idx)
+        d = item_data(sess, it["url"])
+        if d is None or is_empty(d):
+            print("  ԽՆԴԻՐ", it["src"], "՝ էջը չի բացվում՝", it["url"])
+            st["failed"][it["key"]] = st["failed"].get(it["key"], 0) + 1
+            if st["failed"][it["key"]] < 3:
+                st["queue"].append(it)
+        else:
+            cap = make_caption(sess, d)
+            if cap and send(sess, d, cap):
                 st["last_publish"] = now
                 st["turn"] = (st["turn"] + 1) % len(ORDER)
                 st["published"][it["key"]] = now
                 print("հրապարակվեց՝", it["key"])
-                break
-            st["failed"][it["key"]] = st["failed"].get(it["key"], 0) + 1
-            if st["failed"][it["key"]] < 2:
-                st["queue"].append(it)
-                print("  հերթի վերջը՝", it["key"])
             else:
-                print("  դեն նետվեց՝", it["key"])
+                st["failed"][it["key"]] = st["failed"].get(it["key"], 0) + 1
+                if st["failed"][it["key"]] < 3:
+                    st["queue"].append(it)
 
     if len(st["published"]) > 50000:
         keys = list(st["published"])[-20000:]
