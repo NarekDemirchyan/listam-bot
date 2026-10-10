@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# arenda.py — վարձույթի հայտարարությունների բոտ (@Marketplace_arm_bot → @arenda_armenia_arm)
+# arenda.py — վարձույթի բոտ (@Marketplace_arm_bot → @arenda_armenia_arm)
 import os
 import re
 import json
@@ -25,7 +25,7 @@ ORDER = ["list", "list", "list", "estate", "list", "list", "list", "myrealty"]
 ITEM_RE   = re.compile(r"/ru/item/(\d+)")
 ESTATE_RE = re.compile(r"https://www\.estate\.am/ru/[^\s\)\]\"']+-d(\d+)")
 MY_RE     = re.compile(r"https://myrealty\.am/ru/snyat-kvartiru/[^\s\)\]\"']+/(\d+)")
-PHOTO_RE  = re.compile(r"https?://[^\s\)\]\"']+\.(?:jpg|jpeg|png|webp)", re.I)
+PHOTO_RE  = re.compile(r"(?:https?:)?//[^\s\)\]\"']+\.(?:jpg|jpeg|png|webp)", re.I)
 PRICE_RE  = re.compile(r"([\d][\d\s.,]{2,})\s*(֏|AMD|драм|\$|USD|€|EUR)", re.I)
 TEL_RE    = re.compile(r"tel:([+\d][\d\s\-\(\)]{6,})")
 BAD_IMG   = ("logo", "favicon", "icon", "sprite", "no-img", "avatar")
@@ -61,6 +61,8 @@ def collect_photos(*texts):
     out = []
     for t in texts:
         for u in PHOTO_RE.findall(t or ""):
+            if u.startswith("//"):
+                u = "https:" + u
             if any(b in u.lower() for b in BAD_IMG):
                 continue
             if u not in out:
@@ -128,8 +130,7 @@ def item_data(sess, url):
         price = (m.group(1).strip() + " " + m.group(2)).strip()
 
     desc = ""
-    m = re.search(r"Описание\s*\n+(.+?)\n\s*(?:Номер объявления|Похожие|Пожаловаться|"
-                  r"Այս|Հայտարարության)", md, re.S)
+    m = re.search(r"Описание\s*\n+(.+?)\n\s*(?:Номер объявления|Похожие|Пожаловаться)", md, re.S)
     if m:
         desc = " ".join(m.group(1).split())
 
@@ -166,8 +167,7 @@ def make_caption(sess, d):
     return "\n\n".join(x for x in lines if x)[:1024]
 
 def send(sess, d, caption):
-    url = d["url"]
-    markup = {"inline_keyboard": [[{"text": "Связаться", "url": url}]]}
+    markup = {"inline_keyboard": [[{"text": "Связаться", "url": d["url"]}]]}
     photo_list = d["photos"]
 
     if len(photo_list) >= 2:
