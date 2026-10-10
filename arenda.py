@@ -457,7 +457,7 @@ def item_data(sess, url):
           f"գին {price!r}, քարտ {vals}, տեսակ {d['who'] or 'չնշված'}, "
           f"հեռախոս {phone or 'ոչ'}, նկարագրություն {len(desc)}")
     return d
-        def is_empty(d):
+def is_empty(d):
     return not d["photos"] and not d["specs"] and not d["price"] and not d["desc"]
 
 def card_block(d):
