@@ -34,6 +34,7 @@ TITLE_RE  = re.compile(r"((?:Снять|Аренда|Сдается|Сдаётс
 AREA_RE   = re.compile(r"(\d{2,4})\s*(?:Кв\.?\s*м|քմ|ք\.մ)", re.I)
 FLOOR_RE  = re.compile(r"(\d{1,3})\s*/\s*(\d{1,3})\s*(?:Этаж|этаж|հարկ)", re.I)
 BAD_DESC  = re.compile(r"breadcrumb|chevron|\.svg|!\[|\]\(|https?://", re.I)
+ZALOG_RE  = r"Предоплата\s*\n+\s*(1 месяц|2 месяца|3 месяца|\d+\s*месяц(?:а|ев)?|1 ամիս|2 ամիս|[Бб]ез предоплаты)"
 LABELS    = ("Общая площадь", "Жилая площадь", "Площадь кухни", "Площадь", "Высота потолков",
              "Высота потолка", "Этажей в доме", "Этажность", "Этаж", "Количество комнат",
              "Комнаты", "Комнат", "Количество санузлов", "Сан узлы", "Сан узел", "Год постройки",
@@ -202,11 +203,11 @@ def spec_pairs(md):
     grab("высота", r"([\d.,]+\s*м)\s*\n+\s*Высота потолков?")
     grab("комнат", r"(\d{1,3})\s*\n+\s*Количество комнат")
     grab("санузел", r"(\d{1,3})\s*\n+\s*Количество санузлов")
-    grab("залог", r"Предоплата\s*\n+\s*(.{1,24})")
+    grab("залог", ZALOG_RE)
     grab("комиссия", r"([\d.,]+\s*%)\s*\n+\s*Комиссия с арендатора")
     grab("статус", r"(Свободно сейчас|Сдано|Забронировано)\s*\n+\s*Статус доступности")
     grab("мебель", r"Мебель\s*\n+\s*(С мебелью|Без мебели|Частично)")
-    grab("состояние", r"Ремонт\s*\n+\s*(Евроремонт|Новый ремонт|Капитальный ремонт|Косметический ремонт|Без ремонта)")
+    grab("состояние", r"Ремонт\s*\n+\s*(Евроремонт|Новый ремонт|Капитальный ремонт|Косметический ремонт|Без ремонта|Дизайнерский)")
     grab("балкон", r"Балкон\s*\n+\s*(Открытый|Закрытый|Есть|Нет)")
     grab("тип", r"Тип (?:здания|постройки)\s*\n+\s*(.{2,30})")
     grab("район", r"Регион\s*\n+\s*(.{2,45})")
@@ -352,10 +353,9 @@ def item_data(sess, url):
         add_spec(k, val)
     for k, val in features(md):
         add_spec(k, val)
-    m = re.search(r"(?:Регион|Адрес)\s*\n+\s*(.{2,60})", md, re.S)
-    if m and not place:
-        place = " ".join(m.group(1).split())
     vals = dict(specs)
+    if not place and vals.get("район"):
+        place = vals.pop("район")
 
     price = ""
     m = PRICE_RE.search(md)
@@ -373,7 +373,7 @@ def item_data(sess, url):
         phone = fmt_phone(" ".join(m.group(1).split()))
 
     print(f"  {url}\n    md {len(md)}, html {len(html)}, նկար {len(photo_list)}, "
-          f"գին {price!r}, քարտ {vals}, նկարագրություն {len(desc)}")
+          f"գին {price!r}, քարտ {vals}, հեռախոս {'այո' if phone else 'ոչ'}, նկարագրություն {len(desc)}")
     return {"title": title, "price": price, "desc": desc, "place": place,
             "specs": vals, "phone": phone, "photos": photo_list, "url": url}
 
@@ -417,6 +417,8 @@ def make_caption(sess, d):
         lines.append(esc(translate(sess, d["desc"][:400])))
     if d["phone"]:
         lines.append("По всем вопросам обращайтесь:\n📞 " + esc(d["phone"]))
+    else:
+        lines.append('<a href="' + esc(d["url"]) + '">Открыть объявление на сайте</a>')
     return "\n\n".join(x for x in lines if x)[:1024]
 
 def send(sess, d, caption):
