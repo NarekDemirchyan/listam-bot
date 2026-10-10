@@ -26,11 +26,16 @@ jobs:
           pip install requests markdownify playwright
           python -m playwright install --with-deps chromium
 
-      - name: Fix indent
+      - name: Fix code
         run: |
           for f in is_empty card_block make_caption button_message send load save next_candidate publish main; do
             sed -i "s/^[[:space:]]\+def $f(/def $f(/" arenda.py
           done
+          sed -i -E 's|^[[:space:]]*ESTATE_LIST[[:space:]]*=.*|ESTATE_LIST = []|' arenda.py
+          sed -i -E 's|^[[:space:]]*MY_LIST[[:space:]]*=.*|MY_LIST = []|' arenda.py
+          sed -i -E 's|^[[:space:]]*ORDER[[:space:]]*=.*|ORDER = ["list"]|' arenda.py
+          sed -i -E 's|^[[:space:]]*INTERVAL[[:space:]]*=.*|INTERVAL = 7 * 60|' arenda.py
+          grep -n -E '^[[:space:]]*(LIST_CATS|ESTATE_LIST|MY_LIST|ORDER|INTERVAL)' arenda.py
           python -c "import ast;ast.parse(open('arenda.py',encoding='utf-8').read());print('syntax ok')"
 
       - name: Run arenda
