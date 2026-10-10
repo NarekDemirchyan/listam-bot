@@ -73,7 +73,6 @@ NAMES     = {"площадь": "Площадь", "кухня": "Площадь �
              "район": "Район"}
 NUM_KEYS  = ("площадь", "этаж", "этажей", "комнат", "санузел", "год", "высота")
 GENERIC   = ("КВАРТИРЫ", "ОСОБНЯКИ", "ДОМА", "АРЕНДА", "ОФИСЫ", "ПРОДАЖА", "НОВОСТРОЙКИ")
-
 def fetch(sess, url, extra=None):
     md = jina(sess, url, extra) or ""
     if len(md) > 800:
@@ -121,7 +120,6 @@ def latin_junk(t):
 def is_generic(t):
     t = (t or "").strip()
     return (not t) or (t.upper() in GENERIC) or (t.isupper() and len(t.split()) <= 2)
-
 def clean_text(t):
     t = re.sub(r"\s*\|\s*[^|]{0,40}$", "", t or "").strip()
     t = re.sub(r"[,|]?\s*\d{5,9}\s*$", "", t).strip()
@@ -189,7 +187,6 @@ def translate(sess, text):
     except Exception as e:
         print("  թարգմանությունը չկա՝", type(e).__name__)
     return text
-
 def collect_photos(*texts):
     out = []
     for t in texts:
@@ -251,7 +248,6 @@ def features(md):
                 out.append((k, val))
             break
     return out[:14]
-
 def spec_pairs(md):
     out = []
 
@@ -290,7 +286,6 @@ def md_text(t):
     t = re.sub(r"\[([^\]]*)\]\([^)]*\)", r"\1", t)
     t = re.sub(r"\*\*|__", "", t)
     return re.sub(r"[ \t]+", " ", t).strip()
-
 def find_desc(md):
     paras = [md_text(p) for p in re.split(r"\n\s*\n", md)]
     chunks = []
@@ -363,7 +358,6 @@ def collect(sess, st):
         print(f"myrealty.am {page}: գտնվեց {len(items)}, նոր՝ {n}")
         time.sleep(8)
     return found
-
 def item_data(sess, url):
     md = fetch(sess, url)
     html = fetch(sess, url, {"x-respond-with": "html"})
@@ -463,202 +457,3 @@ def item_data(sess, url):
           f"գին {price!r}, քարտ {vals}, տեսակ {d['who'] or 'չնշված'}, "
           f"հեռախոս {phone or 'ոչ'}, նկարագրություն {len(desc)}")
     return d
-
-def is_empty(d):
-    return not d["photos"] and not d["specs"] and not d["price"] and not d["desc"]
-
-def card_block(d):
-    v = d["specs"]
-    card = []
-    if d["place"]:
-        card.append("📍 Район: " + esc(d["place"]))
-    for key, label in CARD:
-        if key == "этаж":
-            val = v.get("этаж")
-            tot = v.get("этажей")
-            if val and "/" not in val and tot:
-                val = val + "/" + tot
-            elif not val:
-                val = tot
-        elif key == "состояние":
-            parts = [low1(v.get("состояние")), low1(v.get("мебель"))]
-            parts = [x for x in parts if x]
-            val = ", ".join(parts) if parts else None
-        elif key == "цена":
-            val = (d["price"] + " / месяц") if d["price"] else None
-        elif key == "статус":
-            val = v.get("статус")
-            if val and "свободно" in val.lower():
-                val = "да"
-        else:
-            val = v.get(key)
-        if val:
-            card.append(label + ": " + esc(val))
-    if d.get("who") == "owner":
-        card.append("👤 Собственник")
-    elif d.get("who") == "agency":
-        card.append("🏢 Агентство")
-    return "\n".join(card)
-
-def make_caption(sess, d):
-    head = translate(sess, d["title"]).strip()
-    if not head or latin_junk(head):
-        head = "Объявление об аренде"
-    lines = ["<b>" + esc(head) + "</b>"]
-    block = card_block(d)
-    if block:
-        lines.append(block)
-    tail = ""
-    if d["phone"]:
-        tail = "По всем вопросам обращайтесь:\n📞 " + esc(d["phone"])
-    cap = "\n\n".join(lines)
-    room = 1024 - len(cap) - (len(tail) + 2 if tail else 0) - 2
-    if d["desc"] and room > 80:
-        txt = esc(translate(sess, d["desc"]))
-        cap += "\n\n" + txt[:room]
-    if tail:
-        cap += "\n\n" + tail
-    return cap[:1024]
-
-def button_message(sess, markup, reply_to=None):
-    payload = {"chat_id": CHAT_ID, "text": "Открыть объявление",
-               "reply_markup": json.dumps(markup)}
-    if reply_to:
-        payload["reply_parameters"] = json.dumps({"message_id": reply_to})
-    r = sess.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage",
-                  data=payload, timeout=40)
-    print("կոճակ՝", r.status_code, r.text[:200])
-    return r.ok
-
-def send(sess, d, caption):
-    photo_list = d["photos"]
-    markup = None
-    if not d["phone"]:
-        markup = {"inline_keyboard": [[{"text": "Открыть объявление", "url": d["url"]}]]}
-    if len(photo_list) >= 2:
-        media = [{"type": "photo", "media": photo_list[0],
-                  "caption": caption, "parse_mode": "HTML"}]
-        for p in photo_list[1:10]:
-            media.append({"type": "photo", "media": p})
-        r = sess.post(f"https://api.telegram.org/bot{TOKEN}/sendMediaGroup",
-                      data={"chat_id": CHAT_ID,
-                            "media": json.dumps(media, ensure_ascii=False)}, timeout=60)
-        print("ալբոմ՝", r.status_code, r.text[:200])
-        if not r.ok:
-            payload = {"chat_id": CHAT_ID, "photo": photo_list[0],
-                       "caption": caption, "parse_mode": "HTML"}
-            if markup:
-                payload["reply_markup"] = json.dumps(markup)
-            r1 = sess.post(f"https://api.telegram.org/bot{TOKEN}/sendPhoto",
-                           data=payload, timeout=40)
-            print("մեկ նկարով՝", r1.status_code, r1.text[:200])
-            return r1.ok
-        if markup:
-            mid = None
-            try:
-                res = r.json().get("result") or []
-                if res:
-                    mid = res[0].get("message_id")
-            except Exception:
-                mid = None
-            button_message(sess, markup, mid)
-        return r.ok
-    payload = {"chat_id": CHAT_ID, "parse_mode": "HTML"}
-    if markup:
-        payload["reply_markup"] = json.dumps(markup)
-    if photo_list:
-        payload["photo"] = photo_list[0]
-        payload["caption"] = caption
-        method = "sendPhoto"
-    else:
-        payload["text"] = caption
-        method = "sendMessage"
-    r = sess.post(f"https://api.telegram.org/bot{TOKEN}/{method}", data=payload, timeout=40)
-    print("ուղարկում՝", r.status_code, r.text[:300])
-    return r.ok
-
-def load():
-    if os.path.exists(STATE):
-        return json.load(open(STATE, encoding="utf-8"))
-    return {"seen": [], "queue": [], "hold": [], "last_publish": 0, "turn": 0,
-            "published": {}, "failed": {}}
-
-def save(st):
-    json.dump(st, open(STATE, "w", encoding="utf-8"), ensure_ascii=False)
-
-def next_candidate(sess, st, tries=3):
-    """անհատները՝ առաջինը․ գործակալականները գնում են պահոց"""
-    for _ in range(tries):
-        if not st["queue"]:
-            break
-        want = ORDER[st["turn"] % len(ORDER)]
-        idx = next((k for k, it in enumerate(st["queue"]) if it["src"] == want), 0)
-        it = st["queue"].pop(idx)
-        d = item_data(sess, it["url"])
-        if d is None or is_empty(d):
-            print("  բաց թողնվեց (դատարկ էջ)՝", it["key"])
-            st["failed"][it["key"]] = st["failed"].get(it["key"], 0) + 1
-            if st["failed"][it["key"]] < 3:
-                st["queue"].append(it)
-            continue
-        if d["who"] == "agency":
-            print("  գործակալություն → պահոց՝", it["key"])
-            st["hold"].append(it)
-            continue
-return it, d
-    while st["hold"]:
-        it = st["hold"].pop(0)
-        d = item_data(sess, it["url"])
-        if d is None or is_empty(d):
-            print("  բաց թողնվեց (դատարկ էջ)՝", it["key"])
-            continue
-        return it, d
-    return None, None
-
-def publish(sess, st, it, d, now):
-    cap = make_caption(sess, d)
-    if cap and send(sess, d, cap):
-        st["last_publish"] = now
-        st["turn"] = (st["turn"] + 1) % len(ORDER)
-        st["published"][it["key"]] = now
-        print("հրապարակվեց՝", it["key"])
-        return True
-    st["failed"][it["key"]] = st["failed"].get(it["key"], 0) + 1
-    if st["failed"][it["key"]] < 3:
-        st["queue"].append(it)
-    return False
-
-def main():
-    st = load()
-    for k, v in (("seen", []), ("queue", []), ("hold", []), ("published", {}),
-                 ("failed", {}), ("turn", 0)):
-        st.setdefault(k, v)
-    st.setdefault("last_publish", 0)
-    sess = requests.Session()
-    now = time.time()
-
-    found = collect(sess, st)
-    while len(st["queue"]) > QUEUE_MAX:
-        st["queue"].pop(0)
-    while len(st["hold"]) > HOLD_MAX:
-        st["hold"].pop(0)
-    print("հերթում՝", len(st["queue"]), "| պահոցում՝", len(st["hold"]))
-
-    if TEST:
-        it, d = next_candidate(sess, st)
-        if it and d:
-            publish(sess, st, it, d, now)
-        save(st)
-        return
-
-    if now - st["last_publish"] >= INTERVAL and (st["queue"] or st["hold"]):
-        it, d = next_candidate(sess, st)
-        if it and d:
-            publish(sess, st, it, d, now)
-
-    if len(st["published"]) > 50000:
-        keys = list(st["published"])[-20000:]
-        st["published"] = {k: st["published"][k] for k in keys}
-    save(st)
-
-main()
