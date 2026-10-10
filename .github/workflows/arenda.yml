@@ -36,7 +36,7 @@ jobs:
         run: |
           git config user.name "github-actions"
           git config user.email "actions@github.com"
-          git add state-arenda.json || true
+          git add state-arenda.json probe.txt || true
           git commit -m "state-arenda" || echo "no changes"
           git pull --rebase --autostash || true
           git push || true
