@@ -33,6 +33,8 @@ jobs:
           s#if has_cyr\(alt\):#if has_cyr(alt) and not alt.rstrip().endswith(".") and len(alt.split()) >= 3:# unless /endswith\("."\)/;
           s#ok = bool\(cap\) and send\(sess, d, iid, cap\)#ok = bool(cap) and bool(d["photos"]) and send(sess, d, iid, cap)# unless /bool\(d\["photos"\]\)/;
           ' bot.py
+          sed -i -E 's|^[[:space:]]*INTERVAL[[:space:]]*=.*|INTERVAL = 10 * 60|' bot.py
+          grep -n -E '^[[:space:]]*INTERVAL' bot.py || echo "ԶԳՈՒՇԱՑՈՒՄ. INTERVAL տողը չգտնվեց"
           grep -n "from fetcher" bot.py || true
           if python -m py_compile bot.py; then echo "patch ok"; else echo "patch FAILED"; git checkout -- bot.py; fi
 
