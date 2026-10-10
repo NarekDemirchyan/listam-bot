@@ -94,6 +94,14 @@ def similar(a, b):
     b = re.sub(r"\W+", "", (b or "").lower())[:60]
     return bool(a) and (a == b or a in b or b in a)
 
+def fmt_phone(p):
+    d = re.sub(r"\D", "", p or "")
+    if d.startswith("374") and len(d) == 11:
+        return "+374 " + d[3:5] + " " + d[5:8] + " " + d[8:]
+    if len(d) == 8:
+        return "+374 " + d[0:2] + " " + d[2:5] + " " + d[5:]
+    return (p or "").strip()
+
 def translate(sess, text):
     text = (text or "").strip()
     if not text:
@@ -144,7 +152,7 @@ def features(md):
             if val and k and k not in keys and len(val) <= 45:
                 num = re.search(r"\d+(?:[.,]\d+)?", val)
                 if k in ("санузел", "комнат", "этажей", "год", "высота") and num:
-                    val = num.group(0) + (" մ" if k == "высота" else "")
+                    val = num.group(0) + (" м" if k == "высота" else "")
                 keys.add(k)
                 out.append((k, val))
             break
@@ -286,7 +294,7 @@ def item_data(sess, url):
     phone = ""
     m = TEL_RE.search(md + "\n" + html)
     if m:
-        phone = " ".join(m.group(1).split())
+        phone = fmt_phone(" ".join(m.group(1).split()))
 
     print(f"  {url}\n    md {len(md)}, html {len(html)}, նկար {len(photo_list)}, վերնագիր {title!r}, գին {price!r}, {feats}")
     return {"title": title, "price": price, "desc": desc, "place": place,
@@ -300,14 +308,14 @@ def make_caption(sess, d):
     if not head:
         head = "Объявление об аренде"
     lines = ["<b>" + esc(head) + "</b>"]
+    if d["price"]:
+        lines.append("<b>" + esc(d["price"]) + "</b>")
     if d["feats"]:
         lines.append("\n".join(esc(x) for x in d["feats"]))
     if d["desc"]:
         lines.append(esc(translate(sess, d["desc"][:600])))
-    if d["price"]:
-        lines.append("<b>" + esc(d["price"]) + "</b>")
     if d["phone"]:
-        lines.append("Тел: <code>" + esc(d["phone"]) + "</code>")
+        lines.append("Телефон: <code>" + esc(d["phone"]) + "</code>")
     return "\n\n".join(x for x in lines if x)[:1024]
 
 def send(sess, d, caption):
