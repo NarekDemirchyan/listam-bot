@@ -11,12 +11,18 @@ STATE      = "state-arenda.json"
 INTERVAL   = 15 * 60
 QUEUE_MAX  = 250
 TEST       = True
-SPEC_ORDER = "value"      # "value" → «60 кв.м — Общая площадь» | "label" → «Общая площадь: 60 кв.м»
 
 LIST_CATS   = ["56"]
 ESTATE_LIST = ["https://www.estate.am/ru/аренда-квартир-s4"]
 MY_LIST     = ["https://myrealty.am/ru", "https://myrealty.am/ru?page=2"]
 ORDER = ["list", "list", "list", "estate", "list", "list", "list", "myrealty"]
+
+CARD = [("комнат", "🏢 Комнат"), ("площадь", "📐 Площадь"), ("этаж", "🏙 Этаж"),
+        ("состояние", "🛋 Состояние"), ("отопление", "🔥 Отопление"),
+        ("кондиционер", "❄️ Кондиционер"), ("балкон", "🏞 Балкон"), ("дети", "👫 С детьми"),
+        ("животные", "🐶 Животные"), ("парковка", "🚗 Парковка"), ("срок", "📅 Срок аренды"),
+        ("цена", "💰 Цена"), ("залог", "🔑 Залог"), ("коммунальные", "🧾 Коммунальные"),
+        ("статус", "📅 Свободна"), ("комиссия", "🤝 Комиссия")]
 
 ITEM_RE   = re.compile(r"/ru/item/(\d+)")
 ESTATE_RE = re.compile(r"https://www\.estate\.am/ru/[^\s\)\]\"']+-d(\d+)")
@@ -27,28 +33,33 @@ TEL_RE    = re.compile(r"tel:([+\d][\d\s\-\(\)]{6,})")
 TITLE_RE  = re.compile(r"((?:Снять|Аренда|Сдается|Сдаётся|Վարձով)[^\n]{5,140}квартир[^\n]{0,90})")
 AREA_RE   = re.compile(r"(\d{2,4})\s*(?:Кв\.?\s*м|քմ|ք\.մ)", re.I)
 FLOOR_RE  = re.compile(r"(\d{1,3})\s*/\s*(\d{1,3})\s*(?:Этаж|этаж|հարկ)", re.I)
-BAD_DESC  = re.compile(r"breadcrumb|chevron|\.svg|!\[|\]\(|https?://|©|Все права", re.I)
+BAD_DESC  = re.compile(r"breadcrumb|chevron|\.svg|!\[|\]\(|https?://", re.I)
 LABELS    = ("Общая площадь", "Жилая площадь", "Площадь кухни", "Площадь", "Высота потолков",
              "Высота потолка", "Этажей в доме", "Этажность", "Этаж", "Количество комнат",
              "Комнаты", "Комнат", "Количество санузлов", "Сан узлы", "Сан узел", "Год постройки",
-             "Тип постройки", "Состояние", "Ремонт", "Мебель", "Балкон", "Отопление", "Лифт",
-             "Интернет", "Комиссия с арендатора", "Комиссия", "Предоплата", "Статус доступности")
+             "Тип здания", "Тип постройки", "Состояние", "Ремонт", "Мебель", "Балкон", "Отопление",
+             "Лифт", "Интернет", "Комиссия с арендатора", "Комиссия", "Предоплата",
+             "Статус доступности")
 KEY       = {"общая площадь": "площадь", "жилая площадь": "площадь", "площадь кухни": "кухня",
              "площадь": "площадь", "высота потолков": "высота", "высота потолка": "высота",
              "этажей в доме": "этажей", "этажность": "этажей", "этаж": "этаж",
              "количество комнат": "комнат", "комнаты": "комнат", "комнат": "комнат",
              "количество санузлов": "санузел", "сан узлы": "санузел", "сан узел": "санузел",
-             "год постройки": "год", "тип постройки": "тип", "состояние": "состояние",
-             "ремонт": "состояние", "мебель": "мебель", "балкон": "балкон",
-             "отопление": "отопление", "лифт": "лифт", "интернет": "интернет",
+             "год постройки": "год", "тип здания": "тип", "тип постройки": "тип",
+             "состояние": "состояние", "ремонт": "состояние", "мебель": "мебель",
+             "балкон": "балкон", "отопление": "отопление", "лифт": "лифт", "интернет": "интернет",
              "комиссия с арендатора": "комиссия", "комиссия": "комиссия",
-             "предоплата": "предоплата", "статус доступности": "статус"}
-NAMES     = {"площадь": "Общая площадь", "кухня": "Площадь кухни", "высота": "Высота потолков",
-             "этажей": "Этажей в доме", "этаж": "Этаж", "комнат": "Количество комнат",
-             "санузел": "Количество санузлов", "год": "Год постройки", "тип": "Тип постройки",
+             "предоплата": "залог", "статус доступности": "статус"}
+NAMES     = {"площадь": "Площадь", "кухня": "Площадь кухни", "высота": "Высота потолков",
+             "этажей": "Этажей в доме", "этаж": "Этаж", "комнат": "Комнат",
+             "санузел": "Санузлов", "год": "Год постройки", "тип": "Тип постройки",
              "состояние": "Состояние", "мебель": "Мебель", "балкон": "Балкон",
              "отопление": "Отопление", "лифт": "Лифт", "интернет": "Интернет",
-             "комиссия": "Комиссия", "предоплата": "Предоплата", "статус": "Статус доступности"}
+             "комиссия": "Комиссия", "залог": "Залог", "статус": "Свободна",
+             "дети": "Дети", "животные": "Животные", "парковка": "Парковка",
+             "кондиционер": "Кондиционер", "коммунальные": "Коммунальные", "срок": "Срок аренды",
+             "район": "Район"}
+NUM_KEYS  = ("площадь", "этаж", "этажей", "комнат", "санузел", "год", "высота")
 GENERIC   = ("КВАРТИРЫ", "ОСОБНЯКИ", "ДОМА", "АРЕНДА", "ОФИСЫ", "ПРОДАЖА", "НОВОСТРОЙКИ")
 
 def fetch(sess, url, extra=None):
@@ -103,6 +114,10 @@ def fmt_phone(p):
         return "+374 " + d[0:2] + " " + d[2:5] + " " + d[5:]
     return (p or "").strip()
 
+def low1(s):
+    s = (s or "").strip()
+    return s[:1].lower() + s[1:] if s else s
+
 def translate(sess, text):
     text = (text or "").strip()
     if not text:
@@ -129,6 +144,13 @@ def collect_photos(*texts):
                 out.append(u)
     return out[:10]
 
+def is_label(s):
+    low = (s or "").strip().lower()
+    return any(low == lab.lower() for lab in LABELS)
+
+def k_num(lab):
+    return KEY.get((lab or "").lower(), "") in NUM_KEYS
+
 def features(md):
     lines = []
     for l in md.split("\n"):
@@ -147,52 +169,95 @@ def features(md):
             else:
                 continue
             val = val.strip(" :|–—-*").strip()
-            if not val and i + 1 < len(lines):
-                val = lines[i + 1].strip(" :|–—-*").strip()
+            if not val:
+                nxt = next((x for x in lines[i + 1:i + 3] if x and not is_label(x)), "")
+                prv = next((x for x in reversed(lines[max(0, i - 3):i]) if x and not is_label(x)), "")
+                if k_num(lab) and not re.search(r"\d", nxt) and re.search(r"\d", prv):
+                    val = prv
+                else:
+                    val = nxt or prv
             k = KEY.get(ll, "")
             if val and k and k not in keys and len(val) <= 45:
                 num = re.search(r"\d+(?:[.,]\d+)?", val)
-                if k in ("санузел", "комнат", "этажей", "год", "высота") and num:
+                if k in NUM_KEYS and num:
                     val = num.group(0) + (" м" if k == "высота" else "")
                 keys.add(k)
                 out.append((k, val))
             break
-    return out[:12]
+    return out[:14]
+
+def spec_pairs(md):
+    out = []
+
+    def grab(key, rx):
+        m = re.search(rx, md, re.S | re.I)
+        if m:
+            v = " ".join(m.group(1).split())
+            if v and len(v) <= 45:
+                out.append((key, v))
+
+    grab("площадь", r"([\d]{2,4}(?:[.,]\d+)?\s*кв\.?\s*м\.?)\s*\n+\s*(?:Общая площадь|Площадь)")
+    grab("этаж", r"(\d{1,3})\s*\n+\s*Этаж\s*\n+\s*\d{1,3}\s*\n+\s*Этажей в доме")
+    grab("этажей", r"\d{1,3}\s*\n+\s*Этаж\s*\n+\s*(\d{1,3})\s*\n+\s*Этажей в доме")
+    grab("высота", r"([\d.,]+\s*м)\s*\n+\s*Высота потолков?")
+    grab("комнат", r"(\d{1,3})\s*\n+\s*Количество комнат")
+    grab("санузел", r"(\d{1,3})\s*\n+\s*Количество санузлов")
+    grab("залог", r"Предоплата\s*\n+\s*(.{1,24})")
+    grab("комиссия", r"([\d.,]+\s*%)\s*\n+\s*Комиссия с арендатора")
+    grab("статус", r"(Свободно сейчас|Сдано|Забронировано)\s*\n+\s*Статус доступности")
+    grab("мебель", r"Мебель\s*\n+\s*(С мебелью|Без мебели|Частично)")
+    grab("состояние", r"Ремонт\s*\n+\s*(Евроремонт|Новый ремонт|Капитальный ремонт|Косметический ремонт|Без ремонта)")
+    grab("балкон", r"Балкон\s*\n+\s*(Открытый|Закрытый|Есть|Нет)")
+    grab("тип", r"Тип (?:здания|постройки)\s*\n+\s*(.{2,30})")
+    grab("район", r"Регион\s*\n+\s*(.{2,45})")
+    grab("отопление", r"Отопление\s*\n+\s*(.{2,30})")
+    grab("срок", r"Срок аренды\s*\n+\s*(.{2,30})")
+    grab("дети", r"Можно с детьми\s*\n+\s*(Да|Нет|По договорённости|По договоренности)")
+    grab("животные", r"Можно с животными\s*\n+\s*(Да|Нет|По договорённости|По договоренности)")
+    grab("коммунальные", r"Коммунальные платежи\s*\n+\s*(Включены|Не включены)")
+    grab("парковка", r"Парковка\s*\n+\s*(Да|Есть|Нет)")
+    grab("кондиционер", r"Кондиционер\s*\n+\s*(Да|Есть|Нет)")
+    return out
 
 def md_text(t):
     t = re.sub(r"!\[[^\]]*\]\([^)]*\)", " ", t or "")
     t = re.sub(r"\[([^\]]*)\]\([^)]*\)", r"\1", t)
+    t = re.sub(r"\*\*|__", "", t)
     return re.sub(r"[ \t]+", " ", t).strip()
 
 def find_desc(md):
     paras = [md_text(p) for p in re.split(r"\n\s*\n", md)]
-    st_i = None
-    for i, p in enumerate(paras):
-        if re.match(r"^#*\s*Описание\b", p):
-            st_i = i + 1
-            break
     chunks = []
-    if st_i is not None:
-        for p in paras[st_i:st_i + 4]:
-            if not p:
+    for i, p in enumerate(paras):
+        m = re.match(r"^\s*[#*>\s\-–—]*Описание\b\s*[:\-–—]?\s*(.*)$", p, re.S)
+        if not m:
+            continue
+        tail = m.group(1).strip()
+        if tail:
+            chunks.append(tail)
+        for q in paras[i + 1:i + 5]:
+            q = q.strip()
+            if not q:
                 continue
-            if re.match(r"^(Похожие|Номер объявления|Пожаловаться|Переведено|"
-                        r"Информация о недвижимости|Контакты|Телефон|Комиссия|Предоплата|Цена|Оплата)", p):
+            if re.match(r"^(Похожие|Номер объявления|Пожаловаться|Переведено|История цены|"
+                        r"Информация о недвижимости|Контакты|Телефон|Комиссия|Предоплата|Цена|Оплата)", q):
                 break
-            if len(p) < 80 or len(p.split()) < 10 or BAD_DESC.search(p):
+            if len(q) < 40 or re.match(r"^#+\s", q) or BAD_DESC.search(q):
                 if chunks:
                     break
                 continue
-            chunks.append(p)
-            if len(" ".join(chunks)) > 600:
+            chunks.append(q)
+            if len(" ".join(chunks)) > 700:
                 break
+        break
     if not chunks:
-        longs = [p for p in paras if 150 <= len(p) <= 1200 and len(p.split()) >= 25
+        longs = [p for p in paras if 150 <= len(p) <= 1200 and len(p.split()) >= 20
                  and not BAD_DESC.search(p) and not re.match(r"^[\W\d\s]+$", p)]
         if longs:
             chunks = [max(longs, key=len)]
     desc = " ".join(" ".join(chunks).split())
-    if len(desc.split()) < 10 or BAD_DESC.search(desc):
+    desc = re.sub(r"\s*Переведено с армянского\s*$", "", desc).strip()
+    if len(desc.split()) < 8 or BAD_DESC.search(desc):
         return ""
     return desc
 
@@ -236,12 +301,13 @@ def collect(sess, st):
 
 def item_data(sess, url):
     md = fetch(sess, url)
-    for cut in ("Похожие объявления", "Похожие"):
-        i = md.find(cut)
+    md_cut = md
+    for cut in ("Похожие объявления", "Выберите ваш язык", "Пожаловаться", "archive-index"):
+        i = md_cut.find(cut)
         if i > 0:
-            md = md[:i]
+            md_cut = md_cut[:i]
     html = fetch(sess, url, {"x-respond-with": "html"})
-    photo_list = collect_photos(md, html)
+    photo_list = collect_photos(md_cut, html)
 
     place = ""
     m = re.search(r"\[([^\]]*›[^\]]*)\]", md)
@@ -278,23 +344,24 @@ def item_data(sess, url):
             specs.append((k, val))
     m = AREA_RE.search(md)
     if m:
-        add_spec("площадь", m.group(1) + " кв.м")
+        add_spec("площадь", m.group(1) + " м²")
     m = FLOOR_RE.search(md)
     if m:
         add_spec("этаж", m.group(1) + "/" + m.group(2))
+    for k, val in spec_pairs(md):
+        add_spec(k, val)
     for k, val in features(md):
         add_spec(k, val)
-
-    feats = []
-    for k, val in specs:
-        name = NAMES[k]
-        feats.append((val + " — " + name) if SPEC_ORDER == "value" else (name + ": " + val))
+    m = re.search(r"(?:Регион|Адрес)\s*\n+\s*(.{2,60})", md, re.S)
+    if m and not place:
+        place = " ".join(m.group(1).split())
+    vals = dict(specs)
 
     price = ""
     m = PRICE_RE.search(md)
     if m:
         num, cur = m.group(1).strip(), m.group(2)
-        price = (num + " $/мес") if cur.lower() in ("месяц", "ամիս") else (num + " " + cur).strip()
+        price = (num + " ֏" if cur.lower() in ("месяц", "ամիս") else (num + " " + cur).strip())
 
     desc = find_desc(md)
     if desc and similar(desc, title):
@@ -305,9 +372,10 @@ def item_data(sess, url):
     if m:
         phone = fmt_phone(" ".join(m.group(1).split()))
 
-    print(f"  {url}\n    md {len(md)}, html {len(html)}, նկար {len(photo_list)}, վերնագիր {title!r}, գին {price!r}, {feats}")
+    print(f"  {url}\n    md {len(md)}, html {len(html)}, նկար {len(photo_list)}, "
+          f"գին {price!r}, քարտ {vals}, նկարագրություն {len(desc)}")
     return {"title": title, "price": price, "desc": desc, "place": place,
-            "feats": feats, "phone": phone, "photos": photo_list, "url": url}
+            "specs": vals, "phone": phone, "photos": photo_list, "url": url}
 
 def make_caption(sess, d):
     head = translate(sess, d["title"]).strip()
@@ -316,15 +384,39 @@ def make_caption(sess, d):
         head = re.split(r"[.!?]\s", alt)[0].strip()[:90] if alt else ""
     if not head:
         head = "Объявление об аренде"
+    v = d["specs"]
     lines = ["<b>" + esc(head) + "</b>"]
-    if d["price"]:
-        lines.append("<b>" + esc(d["price"]) + "</b>")
-    if d["feats"]:
-        lines.append("\n".join(esc(x) for x in d["feats"]))
+    card = []
+    if d["place"]:
+        card.append("📍 Район: " + esc(d["place"]))
+    for key, label in CARD:
+        if key == "этаж":
+            val = v.get("этаж")
+            tot = v.get("этажей")
+            if val and "/" not in val and tot:
+                val = val + "/" + tot
+            elif not val:
+                val = tot
+        elif key == "состояние":
+            parts = [low1(v.get("состояние")), low1(v.get("мебель"))]
+            parts = [x for x in parts if x]
+            val = ", ".join(parts) if parts else None
+        elif key == "цена":
+            val = (d["price"] + " / месяц") if d["price"] else None
+        elif key == "статус":
+            val = v.get("статус")
+            if val and "свободно" in val.lower():
+                val = "да"
+        else:
+            val = v.get(key)
+        if val:
+            card.append(label + ": " + esc(val))
+    if card:
+        lines.append("\n".join(card))
     if d["desc"]:
-        lines.append(esc(translate(sess, d["desc"][:600])))
+        lines.append(esc(translate(sess, d["desc"][:400])))
     if d["phone"]:
-        lines.append("Телефон: <code>" + esc(d["phone"]) + "</code>")
+        lines.append("По всем вопросам обращайтесь:\n📞 " + esc(d["phone"]))
     return "\n\n".join(x for x in lines if x)[:1024]
 
 def send(sess, d, caption):
