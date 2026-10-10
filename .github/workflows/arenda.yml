@@ -26,6 +26,13 @@ jobs:
           pip install requests markdownify playwright
           python -m playwright install --with-deps chromium
 
+      - name: Fix indent
+        run: |
+          for f in is_empty card_block make_caption button_message send load save next_candidate publish main; do
+            sed -i "s/^[[:space:]]\+def $f(/def $f(/" arenda.py
+          done
+          python -c "import ast;ast.parse(open('arenda.py',encoding='utf-8').read());print('syntax ok')"
+
       - name: Run arenda
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
