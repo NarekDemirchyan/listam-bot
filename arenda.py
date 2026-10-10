@@ -8,15 +8,15 @@ CHAT_ID  = os.environ.get("TELEGRAM_CHAT_ID_ARENDA", "")
 JINA_KEY = os.environ.get("JINA_KEY", "")
 
 STATE      = "state-arenda.json"
-INTERVAL   = 18 * 60
+INTERVAL = 7 * 60
 QUEUE_MAX  = 250
 HOLD_MAX   = 400
 TEST       = False
 
 LIST_CATS   = ["56"]
-ESTATE_LIST = ["https://www.estate.am/ru/аренда-квартир-s4"]
-MY_LIST     = ["https://myrealty.am/ru", "https://myrealty.am/ru?page=2"]
-ORDER = ["list", "list", "list", "estate", "list", "list", "list", "myrealty"]
+ESTATE_LIST = []
+MY_LIST = []
+ORDER = ["list"]
 
 CARD = [("комнат", "🏢 Комнат"), ("площадь", "📐 Площадь"), ("этаж", "🏙 Этаж"),
         ("состояние", "🛋 Состояние"), ("отопление", "🔥 Отопление"),
