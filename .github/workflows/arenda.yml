@@ -30,6 +30,7 @@ jobs:
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           TELEGRAM_CHAT_ID_ARENDA: ${{ secrets.TELEGRAM_CHAT_ID_ARENDA }}
+          JINA_KEY: ${{ secrets.JINA_KEY }}
         run: python arenda.py
 
       - name: Save state
