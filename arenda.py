@@ -11,6 +11,7 @@ STATE     = "state-arenda.json"
 INTERVAL  = 15 * 60
 QUEUE_MAX = 250
 TEST      = True
+SPEC_ORDER = "value"      # "value" → «60 кв.м — Общая площадь» | "label" → «Общая площадь: 60 кв.м»
 
 LIST_CATS   = ["56"]
 ESTATE_LIST = ["https://www.estate.am/ru/аренда-квартир-s4"]
@@ -24,14 +25,25 @@ PHOTO_RE  = re.compile(r"(?:https?:)?//(?:img\.list\.am/[a-z]+/\d+/[0-9a-f]+|pic
 PRICE_RE  = re.compile(r"([\d][\d\s.,]{2,})\s*(֏|AMD|драм|\$|USD|€|EUR|Месяц|ամիս)", re.I)
 TEL_RE    = re.compile(r"tel:([+\d][\d\s\-\(\)]{6,})")
 TITLE_RE  = re.compile(r"((?:Снять|Аренда|Сдается|Сдаётся|Վարձով)[^\n]{5,140}квартир[^\n]{0,90})")
-AREA_RE   = re.compile(r"(\d{2,4})\s*(?:Кв\.?\s*м|քմ|ք\.մ)")
-FLOOR_RE  = re.compile(r"(\d{1,3})\s*/\s*(\d{1,3})\s*(?:Этаж|этаж|հարկ)")
-LABELS    = ("Сан узел", "Тип постройки", "Высота потолка", "Состояние", "Мебель",
-             "Балкон", "Отопление", "Год постройки", "Площадь", "Комнаты", "Этажность")
-KEY       = {"сан узел": "санузел", "тип постройки": "тип", "высота потолка": "высота",
-             "состояние": "состояние", "мебель": "мебель", "балкон": "балкон",
-             "отопление": "отопление", "год постройки": "год", "площадь": "площадь",
-             "комнаты": "комнат", "этажность": "этаж"}
+AREA_RE   = re.compile(r"(\d{2,4})\s*(?:Кв\.?\s*м|քմ|ք\.մ)", re.I)
+FLOOR_RE  = re.compile(r"(\d{1,3})\s*/\s*(\d{1,3})\s*(?:Этаж|этаж|հարկ)", re.I)
+LABELS    = ("Общая площадь", "Жилая площадь", "Площадь кухни", "Площадь", "Высота потолков",
+             "Высота потолка", "Этажей в доме", "Этажность", "Этаж", "Количество комнат",
+             "Комнаты", "Комнат", "Количество санузлов", "Сан узлы", "Сан узел", "Год постройки",
+             "Тип постройки", "Состояние", "Ремонт", "Мебель", "Балкон", "Отопление", "Лифт", "Интернет")
+KEY       = {"общая площадь": "площадь", "жилая площадь": "площадь", "площадь кухни": "кухня",
+             "площадь": "площадь", "высота потолков": "высота", "высота потолка": "высота",
+             "этажей в доме": "этажей", "этажность": "этажей", "этаж": "этаж",
+             "количество комнат": "комнат", "комнаты": "комнат", "комнат": "комнат",
+             "количество санузлов": "санузел", "сан узлы": "санузел", "сан узел": "санузел",
+             "год постройки": "год", "тип постройки": "тип", "состояние": "состояние",
+             "ремонт": "состояние", "мебель": "мебель", "балкон": "балкон",
+             "отопление": "отопление", "лифт": "лифт", "интернет": "интернет"}
+NAMES     = {"площадь": "Общая площадь", "кухня": "Площадь кухни", "высота": "Высота потолков",
+             "этажей": "Этажей в доме", "этаж": "Этаж", "комнат": "Количество комнат",
+             "санузел": "Количество санузлов", "год": "Год постройки", "тип": "Тип постройки",
+             "состояние": "Состояние", "мебель": "Мебель", "балкон": "Балкон",
+             "отопление": "Отопление", "лифт": "Лифт", "интернет": "Интернет"}
 GENERIC   = ("КВАРТИРЫ", "ОСОБНЯКИ", "ДОМА", "АРЕНДА", "ОФИСЫ", "ПРОДАЖА", "НОВОСТРОЙКИ")
 
 def fetch(sess, url, extra=None):
@@ -111,22 +123,28 @@ def features(md):
         lines.append(re.sub(r"[|\s]+$", "", l).strip())
     out, keys = [], set()
     for i, line in enumerate(lines):
+        if not line or len(line) > 90:
+            continue
         for lab in sorted(LABELS, key=len, reverse=True):
-            if not line.lower().startswith(lab.lower()):
+            low, ll = line.lower(), lab.lower()
+            if low.startswith(ll):
+                val = line[len(lab):]
+            elif low.endswith(ll):
+                val = line[:-len(lab)]
+            else:
                 continue
-            val = line[len(lab):].strip(" :|–—-*").strip()
+            val = val.strip(" :|–—-*").strip()
             if not val and i + 1 < len(lines):
                 val = lines[i + 1].strip(" :|–—-*").strip()
-            if val and len(val) <= 45:
-                k = KEY.get(lab.lower(), lab.lower())
-                if k not in keys:
-                    num = re.search(r"\d+(?:[.,]\d+)?", val)
-                    if k in ("санузел", "комнат", "этаж", "год", "высота") and num:
-                        val = num.group(0) + (" м" if k == "высота" else "")
-                    keys.add(k)
-                    out.append((k, lab + ": " + val))
+            k = KEY.get(ll, "")
+            if val and k and k not in keys and len(val) <= 45:
+                num = re.search(r"\d+(?:[.,]\d+)?", val)
+                if k in ("санузел", "комнат", "этажей", "год", "высота") and num:
+                    val = num.group(0) + (" м" if k == "высота" else "")
+                keys.add(k)
+                out.append((k, val))
             break
-    return out[:8]
+    return out[:10]
 
 def add(st, src, key, url, found):
     found.append((src, key, url))
@@ -206,19 +224,24 @@ def item_data(sess, url):
             base += ", " + place
         title = clean_text(base)
 
-    feats, keys = [], set()
+    specs, keys = [], set()
+    def add_spec(k, val):
+        if k not in keys and k in NAMES and val:
+            keys.add(k)
+            specs.append((k, val))
     m = AREA_RE.search(md)
     if m:
-        feats.append(m.group(1) + " кв.м")
-        keys.add("площадь")
+        add_spec("площадь", m.group(1) + " кв.м")
     m = FLOOR_RE.search(md)
     if m:
-        feats.append("этаж " + m.group(1) + "/" + m.group(2))
-        keys.add("этаж")
-    for k, text in features(md):
-        if k not in keys:
-            keys.add(k)
-            feats.append(text)
+        add_spec("этаж", m.group(1) + "/" + m.group(2))
+    for k, val in features(md):
+        add_spec(k, val)
+
+    feats = []
+    for k, val in specs:
+        name = NAMES[k]
+        feats.append((val + " — " + name) if SPEC_ORDER == "value" else (name + ": " + val))
 
     price = ""
     m = PRICE_RE.search(md)
@@ -249,17 +272,15 @@ def make_caption(sess, d):
         head = re.split(r"[.!?]\s", alt)[0].strip()[:90] if alt else ""
     if not head:
         head = "Объявление об аренде"
-    lines = ["<b>" + esc(head) + "</b>", "Аренда | Ереван и области"]
-    if d["price"]:
-        lines.append("<b>" + esc(d["price"]) + "</b>")
+    lines = ["<b>" + esc(head) + "</b>"]
     if d["feats"]:
-        lines.append(" · ".join(esc(x) for x in d["feats"]))
-    if d["place"] and d["place"] not in head:
-        lines.append(esc(d["place"]))
+        lines.append("\n".join(esc(x) for x in d["feats"]))
     if d["desc"]:
         lines.append(esc(translate(sess, d["desc"][:600])))
+    if d["price"]:
+        lines.append("<b>" + esc(d["price"]) + "</b>")
     if d["phone"]:
-        lines.append("Телефон: <code>" + esc(d["phone"]) + "</code>")
+        lines.append("Тел: <code>" + esc(d["phone"]) + "</code>")
     return "\n\n".join(x for x in lines if x)[:1024]
 
 def send(sess, d, caption):
@@ -333,7 +354,7 @@ def main():
         if pick:
             d = item_data(sess, pick["url"])
             cap = make_caption(sess, d)
-            print("caption՝", cap[:400])
+            print("caption՝", cap[:500])
             if send(sess, d, cap):
                 st["published"][pick["key"]] = now
                 st["last_publish"] = now
