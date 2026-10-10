@@ -27,7 +27,11 @@ TITLE_RE  = re.compile(r"((?:Снять|Аренда|Сдается|Сдаётс
 AREA_RE   = re.compile(r"(\d{2,4})\s*(?:Кв\.?\s*м|քմ|ք\.մ)")
 FLOOR_RE  = re.compile(r"(\d{1,3})\s*/\s*(\d{1,3})\s*(?:Этаж|этаж|հարկ)")
 LABELS    = ("Сан узел", "Тип постройки", "Высота потолка", "Состояние", "Мебель",
-             "Балкон", "Отопление", "Год постройки", "Площадь", "Комнат")
+             "Балкон", "Отопление", "Год постройки", "Площадь", "Комнаты", "Этажность")
+KEY       = {"сан узел": "санузел", "тип постройки": "тип", "высота потолка": "высота",
+             "состояние": "состояние", "мебель": "мебель", "балкон": "балкон",
+             "отопление": "отопление", "год постройки": "год", "площадь": "площадь",
+             "комнаты": "комнат", "этажность": "этаж"}
 GENERIC   = ("КВАРТИРЫ", "ОСОБНЯКИ", "ДОМА", "АРЕНДА", "ОФИСЫ", "ПРОДАЖА", "НОВОСТРОЙКИ")
 
 def fetch(sess, url, extra=None):
@@ -64,10 +68,15 @@ def is_generic(t):
     t = (t or "").strip()
     return (not t) or (t.upper() in GENERIC) or (t.isupper() and len(t.split()) <= 2)
 
-def clean_title(t):
+def clean_text(t):
     t = re.sub(r"\s*\|\s*[^|]{0,40}$", "", t or "").strip()
     t = re.sub(r"[,|]?\s*\d{5,9}\s*$", "", t).strip()
     return t.strip(" ,|-–—")
+
+def similar(a, b):
+    a = re.sub(r"\W+", "", (a or "").lower())[:60]
+    b = re.sub(r"\W+", "", (b or "").lower())[:60]
+    return bool(a) and (a == b or a in b or b in a)
 
 def translate(sess, text):
     text = (text or "").strip()
@@ -96,17 +105,27 @@ def collect_photos(*texts):
     return out[:10]
 
 def features(md):
-    lines = [l.strip().lstrip("#* ").strip() for l in md.split("\n")]
-    out = []
+    lines = []
+    for l in md.split("\n"):
+        l = re.sub(r"^[|*#>\s\-–—]+", "", l.strip())
+        lines.append(re.sub(r"[|\s]+$", "", l).strip())
+    out, keys = [], set()
     for i, line in enumerate(lines):
-        for lab in LABELS:
-            if line == lab or line.startswith(lab):
-                val = line[len(lab):].strip(" :|–—-").strip()
-                if not val and i + 1 < len(lines):
-                    val = lines[i + 1].strip(" |–—-").strip()
-                if val and 1 <= len(val) <= 45 and lab not in " | ".join(out):
-                    out.append(lab + ": " + val)
-                break
+        for lab in sorted(LABELS, key=len, reverse=True):
+            if not line.lower().startswith(lab.lower()):
+                continue
+            val = line[len(lab):].strip(" :|–—-*").strip()
+            if not val and i + 1 < len(lines):
+                val = lines[i + 1].strip(" :|–—-*").strip()
+            if val and len(val) <= 45:
+                k = KEY.get(lab.lower(), lab.lower())
+                if k not in keys:
+                    num = re.search(r"\d+(?:[.,]\d+)?", val)
+                    if k in ("санузел", "комнат", "этаж", "год", "высота") and num:
+                        val = num.group(0) + (" м" if k == "высота" else "")
+                    keys.add(k)
+                    out.append((k, lab + ": " + val))
+            break
     return out[:8]
 
 def add(st, src, key, url, found):
@@ -173,11 +192,11 @@ def item_data(sess, url):
     title = ""
     m = re.search(r"^#\s+(.+)$", md, re.M)
     if m:
-        title = clean_title(m.group(1))
+        title = clean_text(m.group(1))
     if is_generic(title):
         m = TITLE_RE.search(md)
         if m:
-            title = clean_title(m.group(1))
+            title = clean_text(m.group(1))
     if is_generic(title):
         rooms = re.search(r"/(\d+)-komnatnaya/", url)
         base = "Аренда"
@@ -185,18 +204,21 @@ def item_data(sess, url):
             base += " " + rooms.group(1) + "-комнатной квартиры"
         if place:
             base += ", " + place
-        title = clean_title(base)
+        title = clean_text(base)
 
-    feats = []
+    feats, keys = [], set()
     m = AREA_RE.search(md)
     if m:
         feats.append(m.group(1) + " кв.м")
+        keys.add("площадь")
     m = FLOOR_RE.search(md)
     if m:
         feats.append("этаж " + m.group(1) + "/" + m.group(2))
-    for f in features(md):
-        if f.split(":")[0] not in " | ".join(feats):
-            feats.append(f)
+        keys.add("этаж")
+    for k, text in features(md):
+        if k not in keys:
+            keys.add(k)
+            feats.append(text)
 
     price = ""
     m = PRICE_RE.search(md)
@@ -207,7 +229,9 @@ def item_data(sess, url):
     desc = ""
     m = re.search(r"Описание\s*\n+(.+?)\n\s*(?:Номер объявления|Похожие|Пожаловаться)", md, re.S)
     if m:
-        desc = " ".join(m.group(1).split())
+        desc = clean_text(" ".join(m.group(1).split()))
+    if desc and similar(desc, title):
+        desc = ""
 
     phone = ""
     m = TEL_RE.search(md + "\n" + html)
