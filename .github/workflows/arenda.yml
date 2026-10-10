@@ -59,3 +59,4 @@ jobs:
           git commit -m "state-arenda" || echo "no changes"
           git pull --rebase --autostash || true
           git push || true
+          
