@@ -7,10 +7,10 @@ TOKEN    = os.environ.get("TELEGRAM_TOKEN", "")
 CHAT_ID  = os.environ.get("TELEGRAM_CHAT_ID_ARENDA", "")
 JINA_KEY = os.environ.get("JINA_KEY", "")
 
-STATE     = "state-arenda.json"
-INTERVAL  = 15 * 60
-QUEUE_MAX = 250
-TEST      = True
+STATE      = "state-arenda.json"
+INTERVAL   = 15 * 60
+QUEUE_MAX  = 250
+TEST       = True
 SPEC_ORDER = "value"      # "value" → «60 кв.м — Общая площадь» | "label" → «Общая площадь: 60 кв.м»
 
 LIST_CATS   = ["56"]
@@ -144,11 +144,40 @@ def features(md):
             if val and k and k not in keys and len(val) <= 45:
                 num = re.search(r"\d+(?:[.,]\d+)?", val)
                 if k in ("санузел", "комнат", "этажей", "год", "высота") and num:
-                    val = num.group(0) + (" м" if k == "высота" else "")
+                    val = num.group(0) + (" մ" if k == "высота" else "")
                 keys.add(k)
                 out.append((k, val))
             break
     return out[:12]
+
+def find_desc(md):
+    paras = [p.strip() for p in re.split(r"\n\s*\n", md)]
+    st_i = None
+    for i, p in enumerate(paras):
+        if re.match(r"^#*\s*Описание\b", p):
+            st_i = i + 1
+            break
+    chunks = []
+    if st_i is not None:
+        for p in paras[st_i:st_i + 4]:
+            if not p:
+                continue
+            if re.match(r"^(Похожие|Номер объявления|Пожаловаться|Переведено|"
+                        r"Информация о недвижимости|Контакты|Телефон|Комиссия|Предоплата|Цена|Оплата)", p):
+                break
+            if len(p) < 40 or re.match(r"^#+\s", p):
+                if chunks:
+                    break
+                continue
+            chunks.append(p)
+            if len(" ".join(chunks)) > 600:
+                break
+    if not chunks:
+        longs = [p for p in paras if 150 <= len(p) <= 1000 and len(p.split()) >= 15
+                 and not re.search(r"http|©|list\.am|myrealty", p, re.I)]
+        if longs:
+            chunks = [max(longs, key=len)]
+    return " ".join(" ".join(chunks).split())
 
 def add(st, src, key, url, found):
     found.append((src, key, url))
@@ -250,10 +279,7 @@ def item_data(sess, url):
         num, cur = m.group(1).strip(), m.group(2)
         price = (num + " $/мес") if cur.lower() in ("месяц", "ամիս") else (num + " " + cur).strip()
 
-    desc = ""
-    m = re.search(r"Описание\s*\n+(.+?)\n\s*(?:Номер объявления|Похожие|Пожаловаться)", md, re.S)
-    if m:
-        desc = clean_text(" ".join(m.group(1).split()))
+    desc = clean_text(find_desc(md))
     if desc and similar(desc, title):
         desc = ""
 
