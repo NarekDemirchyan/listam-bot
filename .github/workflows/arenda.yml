@@ -35,8 +35,27 @@ jobs:
           sed -i -E 's|^[[:space:]]*MY_LIST[[:space:]]*=.*|MY_LIST = []|' arenda.py
           sed -i -E 's|^[[:space:]]*ORDER[[:space:]]*=.*|ORDER = ["list"]|' arenda.py
           sed -i -E 's|^[[:space:]]*INTERVAL[[:space:]]*=.*|INTERVAL = 7 * 60|' arenda.py
+          sed -i -E 's|^[[:space:]]*(QUEUE_MAX|MAX_QUEUE|QUEUE_LIMIT)[[:space:]]*=.*|\1 = 500|' arenda.py
           grep -n -E '^[[:space:]]*(LIST_CATS|ESTATE_LIST|MY_LIST|ORDER|INTERVAL)' arenda.py
+          grep -n -E '^[[:space:]]*(QUEUE_MAX|MAX_QUEUE|QUEUE_LIMIT)' arenda.py || echo "ԶԳՈՒՇԱՑՈՒՄ. առաստաղի տողը չգտնվեց"
           python -c "import ast;ast.parse(open('arenda.py',encoding='utf-8').read());print('syntax ok')"
+
+      - name: Clean queue
+        run: |
+          python - <<'PY'
+          import json, os
+          p = "state-arenda.json"
+          if os.path.exists(p):
+              st = json.load(open(p, encoding="utf-8"))
+              q = st.get("queue", [])
+              keep = [it for it in q if it.get("src") == "list"]
+              if len(keep) != len(q):
+                  st["queue"] = keep
+                  json.dump(st, open(p, "w", encoding="utf-8"), ensure_ascii=False)
+                  print("հերթից հանվեց", len(q) - len(keep), "ոչ-list հայտարարություն")
+              else:
+                  print("հերթը մաքուր է")
+          PY
 
       - name: Run arenda
         env:
