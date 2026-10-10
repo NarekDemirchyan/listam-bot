@@ -30,10 +30,14 @@ MY_RE     = re.compile(r"https://myrealty\.am/ru/snyat-kvartiru/[^\s\)\]\"']+/(\
 PHOTO_RE  = re.compile(r"(?:https?:)?//(?:img\.list\.am/[^\s\)\]\"']+|pic\.estate\.am/[^\s\)\]\"']+|myrealty\.am/images/[0-9a-f]{2}/[0-9a-f]{2}/[^\s\)\]\"']+)\.(?:jpg|jpeg|png|webp)", re.I)
 PRICE_RE  = re.compile(r"([\d][\d\s.,]{2,})\s*(֏|AMD|драм|\$|USD|€|EUR|Месяц|ամիս)", re.I)
 TEL_RE    = re.compile(r"tel:([+\d][\d\s\-\(\)]{6,})")
+OG_RE     = re.compile(r'<meta[^>]+(?:property|name)=["\']og:(title|description)["\'][^>]*content=["\']([^"\']*)', re.I)
 TITLE_RE  = re.compile(r"((?:Снять|Аренда|Сдается|Сдаётся|Վարձով)[^\n]{5,140}квартир[^\n]{0,90})")
 AREA_RE   = re.compile(r"(\d{2,4})\s*(?:Кв\.?\s*м|քմ|ք\.մ)", re.I)
 FLOOR_RE  = re.compile(r"(\d{1,3})\s*/\s*(\d{1,3})\s*(?:Этаж|этаж|հարկ)", re.I)
 BAD_DESC  = re.compile(r"breadcrumb|chevron|\.svg|!\[|\]\(|https?://", re.I)
+HOURS_RE  = re.compile(r"(?:Пн|Вт|Ср|Чт|Пт|Сб|Вс|Понедельник|Вторник|Среда|Четверг|Пятница|Суббота|Воскресенье)"
+                       r"[^\nА-Яа-я]{0,12}\d{1,2}[:.]\d{2}\s*[-–—]\s*\d{1,2}[:.]\d{2}", re.I)
+WORK_RE   = re.compile(r"(?:График работы|Часы работы|Рабочие часы)[^\n]{0,80}", re.I)
 ZALOG_RE  = r"Предоплата\s*\n+\s*(1 месяц|2 месяца|3 месяца|\d+\s*месяц(?:а|ев)?|1 ամիս|2 ամիս|[Бб]ез предоплаты)"
 LABELS    = ("Общая площадь", "Жилая площадь", "Площадь кухни", "Площадь", "Высота потолков",
              "Высота потолка", "Этажей в доме", "Этажность", "Этаж", "Количество комнат",
@@ -102,6 +106,18 @@ def clean_text(t):
     t = re.sub(r"[,|]?\s*\d{5,9}\s*$", "", t).strip()
     return t.strip(" ,|-–—")
 
+def clean_title(t):
+    t = clean_text(t)
+    t = re.sub(r"\s*[-–|]\s*[^-–|]*(?:List\.am|Аренда квартир|Long-term|Долгосрочная)[^-–|]*$", "", t, flags=re.I)
+    return t.strip(" ,|-–—")
+
+def clean_desc_text(t):
+    t = WORK_RE.sub(" ", t or "")
+    t = HOURS_RE.sub(" ", t)
+    t = re.sub(r"\s*Переведено с армянского\s*", " ", t, flags=re.I)
+    t = re.sub(r"\s{2,}", " ", t)
+    return t.strip(" ,|;–—-")
+
 def similar(a, b):
     a = re.sub(r"\W+", "", (a or "").lower())[:60]
     b = re.sub(r"\W+", "", (b or "").lower())[:60]
@@ -118,6 +134,12 @@ def fmt_phone(p):
 def low1(s):
     s = (s or "").strip()
     return s[:1].lower() + s[1:] if s else s
+
+def meta(html, name):
+    for k, v in OG_RE.findall(html or ""):
+        if k.lower() == name:
+            return v.strip()
+    return ""
 
 def translate(sess, text):
     text = (text or "").strip()
@@ -256,8 +278,7 @@ def find_desc(md):
                  and not BAD_DESC.search(p) and not re.match(r"^[\W\d\s]+$", p)]
         if longs:
             chunks = [max(longs, key=len)]
-    desc = " ".join(" ".join(chunks).split())
-    desc = re.sub(r"\s*Переведено с армянского\s*$", "", desc).strip()
+    desc = clean_desc_text(" ".join(" ".join(chunks).split()))
     if len(desc.split()) < 8 or BAD_DESC.search(desc):
         return ""
     return desc
@@ -324,19 +345,17 @@ def item_data(sess, url):
     title = ""
     m = re.search(r"^#\s+(.+)$", md, re.M)
     if m:
-        title = clean_text(m.group(1))
+        title = clean_title(m.group(1))
+    if is_generic(title):
+        t = clean_title(meta(html, "title"))
+        if t:
+            title = t
     if is_generic(title):
         m = TITLE_RE.search(md)
         if m:
-            title = clean_text(m.group(1))
+            title = clean_title(m.group(1))
     if is_generic(title):
-        rooms = re.search(r"/(\d+)-komnatnaya/", url)
-        base = "Аренда"
-        if rooms:
-            base += " " + rooms.group(1) + "-комнатной квартиры"
-        if place:
-            base += ", " + place
-        title = clean_text(base)
+        title = "Аренда квартиры" + (", " + place if place else "")
 
     specs, keys = [], set()
     def add_spec(k, val):
@@ -364,6 +383,10 @@ def item_data(sess, url):
         price = (num + " ֏" if cur.lower() in ("месяц", "ամիս") else (num + " " + cur).strip())
 
     desc = find_desc(md)
+    if not desc:
+        desc = clean_desc_text(md_text(meta(html, "description")))
+        if len(desc.split()) < 8:
+            desc = ""
     if desc and similar(desc, title):
         desc = ""
 
@@ -372,20 +395,13 @@ def item_data(sess, url):
     if m:
         phone = fmt_phone(" ".join(m.group(1).split()))
 
-    print(f"  {url}\n    md {len(md)}, html {len(html)}, նկար {len(photo_list)}, "
+    print(f"  {url}\n    md {len(md)}, html {len(html)}, նկար {len(photo_list)}, վերնագիր {title!r}, "
           f"գին {price!r}, քարտ {vals}, հեռախոս {'այո' if phone else 'ոչ'}, նկարագրություն {len(desc)}")
     return {"title": title, "price": price, "desc": desc, "place": place,
             "specs": vals, "phone": phone, "photos": photo_list, "url": url}
 
-def make_caption(sess, d):
-    head = translate(sess, d["title"]).strip()
-    if not head or latin_junk(head):
-        alt = translate(sess, d["desc"][:300]).strip()
-        head = re.split(r"[.!?]\s", alt)[0].strip()[:90] if alt else ""
-    if not head:
-        head = "Объявление об аренде"
+def card_block(d):
     v = d["specs"]
-    lines = ["<b>" + esc(head) + "</b>"]
     card = []
     if d["place"]:
         card.append("📍 Район: " + esc(d["place"]))
@@ -411,15 +427,27 @@ def make_caption(sess, d):
             val = v.get(key)
         if val:
             card.append(label + ": " + esc(val))
-    if card:
-        lines.append("\n".join(card))
-    if d["desc"]:
-        lines.append(esc(translate(sess, d["desc"][:400])))
+    return "\n".join(card)
+
+def make_caption(sess, d):
+    head = translate(sess, d["title"]).strip()
+    if not head or latin_junk(head):
+        head = "Объявление об аренде"
+    lines = ["<b>" + esc(head) + "</b>"]
+    block = card_block(d)
+    if block:
+        lines.append(block)
+    tail = ""
     if d["phone"]:
-        lines.append("По всем вопросам обращайтесь:\n📞 " + esc(d["phone"]))
-    else:
-        lines.append('<a href="' + esc(d["url"]) + '">Открыть объявление на сайте</a>')
-    return "\n\n".join(x for x in lines if x)[:1024]
+        tail = "По всем вопросам обращайтесь:\n📞 " + esc(d["phone"])
+    cap = "\n\n".join(lines)
+    room = 1024 - len(cap) - (len(tail) + 2 if tail else 0) - 2
+    if d["desc"] and room > 80:
+        txt = esc(translate(sess, d["desc"]))
+        cap += "\n\n" + txt[:room]
+    if tail:
+        cap += "\n\n" + tail
+    return cap[:1024]
 
 def send(sess, d, caption):
     photo_list = d["photos"]
@@ -509,8 +537,11 @@ def main():
             ok = False
             try:
                 d = item_data(sess, it["url"])
-                cap = make_caption(sess, d)
-                ok = bool(cap) and send(sess, d, cap)
+                if not d["photos"] and not d["specs"] and not d["price"]:
+                    print("  դատարկ էջ՝", it["key"])
+                else:
+                    cap = make_caption(sess, d)
+                    ok = bool(cap) and send(sess, d, cap)
             except Exception as e:
                 print("հրապարակման սխալ՝", e)
             if ok:
