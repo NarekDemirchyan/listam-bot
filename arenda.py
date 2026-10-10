@@ -10,6 +10,7 @@ JINA_KEY = os.environ.get("JINA_KEY", "")
 STATE      = "state-arenda.json"
 INTERVAL   = 18 * 60
 QUEUE_MAX  = 250
+HOLD_MAX   = 400
 TEST       = False
 
 LIST_CATS   = ["56"]
@@ -19,10 +20,10 @@ ORDER = ["list", "list", "list", "estate", "list", "list", "list", "myrealty"]
 
 CARD = [("комнат", "🏢 Комнат"), ("площадь", "📐 Площадь"), ("этаж", "🏙 Этаж"),
         ("состояние", "🛋 Состояние"), ("отопление", "🔥 Отопление"),
-        ("кондиционер", "❄️ Кондиционер"), ("балкон", "🏞 Балкон"), ("дети", "👫 С детьми"),
-        ("животные", "🐶 Животные"), ("парковка", "🚗 Парковка"), ("срок", "📅 Срок аренды"),
-        ("цена", "💰 Цена"), ("залог", "🔑 Залог"), ("коммунальные", "🧾 Коммунальные"),
-        ("статус", "📅 Свободна"), ("комиссия", "🤝 Комиссия")]
+        ("кондиционер", "❄️ Кондиционер"), ("балкон", "🏞 Балкон"), ("санузел", "🚿 Санузел"),
+        ("дети", "👫 С детьми"), ("животные", "🐶 Животные"), ("парковка", "🚗 Парковка"),
+        ("срок", "📅 Срок аренды"), ("цена", "💰 Цена"), ("залог", "🔑 Залог"),
+        ("коммунальные", "🧾 Коммунальные"), ("статус", "📅 Свободна"), ("комиссия", "🤝 Комиссия")]
 
 ITEM_RE   = re.compile(r"/ru/item/(\d+)")
 ESTATE_RE = re.compile(r"https://www\.estate\.am/ru/[^\s\)\]\"']+-d(\d+)")
@@ -41,6 +42,10 @@ HOURS_RE  = re.compile(r"(?:Пн|Вт|Ср|Чт|Пт|Сб|Вс|Понедель�
 WORK_RE   = re.compile(r"(?:График работы|Часы работы|Рабочие часы)[^\n]{0,80}", re.I)
 TAIL_RE   = re.compile(r"\s*(?:Похожие|Նման|Similar|Пожаловаться|Выберите ваш язык)[^\n]*$", re.I)
 ZALOG_RE  = r"Предоплата\s*\n+\s*(1 месяц|2 месяца|3 месяца|\d+\s*месяц(?:а|ев)?|1 ամիս|2 ամիս|[Бб]ез предоплаты)"
+OWN_RE    = re.compile(r"собственник|от хозяина|от хозяйки|хозяин квартир|без посредник|без комисси|"
+                       r"сдаю сам|սեփականատեր|без агент", re.I)
+AG_RE     = re.compile(r"агентств|агент по недвижимости|риэлтор|риелтор|ООО|недвижимост[ьи] \"|"
+                       r"комисси\w*\s*(?:с арендатора)?\s*[:—-]?\s*\d+\s*%", re.I)
 LABELS    = ("Общая площадь", "Жилая площадь", "Площадь кухни", "Площадь", "Высота потолков",
              "Высота потолка", "Этажей в доме", "Этажность", "Этаж", "Количество комнат",
              "Комнаты", "Комнат", "Количество санузлов", "Сан узлы", "Сан узел", "Год постройки",
@@ -195,6 +200,15 @@ def collect_photos(*texts):
             if u not in out:
                 out.append(u)
     return out[:10]
+
+def classify(d):
+    txt = " ".join([d.get("title", ""), d.get("desc", ""),
+                    " ".join(str(v) for v in (d.get("specs") or {}).values())])
+    if AG_RE.search(txt):
+        return "agency"
+    if OWN_RE.search(txt):
+        return "owner"
+    return ""
 
 def is_label(s):
     low = (s or "").strip().lower()
@@ -378,21 +392,6 @@ def item_data(sess, url):
                 break
     place = clean_place(place)
 
-    title = ""
-    m = re.search(r"^#\s+(.+)$", md, re.M)
-    if m:
-        title = clean_title(m.group(1))
-    if is_generic(title):
-        t = clean_title(meta(html, "title"))
-        if t:
-            title = t
-    if is_generic(title):
-        m = TITLE_RE.search(md)
-        if m:
-            title = clean_title(m.group(1))
-    if is_generic(title):
-        title = "Аренда квартиры" + (", " + place if place else "")
-
     specs, keys = [], set()
     def add_spec(k, val):
         val = " ".join((val or "").split())
@@ -417,6 +416,30 @@ def item_data(sess, url):
     if not place and vals.get("район"):
         place = clean_place(vals.pop("район"))
 
+    title = ""
+    m = re.search(r"^#\s+(.+)$", md, re.M)
+    if m:
+        title = clean_title(m.group(1))
+    if is_generic(title):
+        t = clean_title(meta(html, "title"))
+        if t:
+            title = t
+    if is_generic(title):
+        m = TITLE_RE.search(md)
+        if m:
+            title = clean_title(m.group(1))
+    if is_generic(title):
+        bits = []
+        if vals.get("комнат"):
+            bits.append(vals["комнат"] + "-комн. квартира")
+        else:
+            bits.append("Аренда квартиры")
+        if vals.get("площадь"):
+            bits.append(vals["площадь"])
+        if place:
+            bits.append(place)
+        title = ", ".join(bits)
+
     price = ""
     m = PRICE_RE.search(md)
     if m:
@@ -433,10 +456,13 @@ def item_data(sess, url):
 
     phone = find_phone(md, md_cut, html)
 
+    d = {"title": title, "price": price, "desc": desc, "place": place,
+         "specs": vals, "phone": phone, "photos": photo_list, "url": url}
+    d["who"] = classify(d)
     print(f"  {url}\n    md {len(md)}, html {len(html)}, նկար {len(photo_list)}, վերնագիր {title!r}, "
-          f"գին {price!r}, քարտ {vals}, հեռախոս {phone or 'ոչ'}, նկարագրություն {len(desc)}")
-    return {"title": title, "price": price, "desc": desc, "place": place,
-            "specs": vals, "phone": phone, "photos": photo_list, "url": url}
+          f"գին {price!r}, քարտ {vals}, տեսակ {d['who'] or 'չնշված'}, "
+          f"հեռախոս {phone or 'ոչ'}, նկարագրություն {len(desc)}")
+    return d
 
 def is_empty(d):
     return not d["photos"] and not d["specs"] and not d["price"] and not d["desc"]
@@ -468,6 +494,10 @@ def card_block(d):
             val = v.get(key)
         if val:
             card.append(label + ": " + esc(val))
+    if d.get("who") == "owner":
+        card.append("👤 Собственник")
+    elif d.get("who") == "agency":
+        card.append("🏢 Агентство")
     return "\n".join(card)
 
 def make_caption(sess, d):
@@ -550,72 +580,28 @@ def send(sess, d, caption):
 def load():
     if os.path.exists(STATE):
         return json.load(open(STATE, encoding="utf-8"))
-    return {"seen": [], "queue": [], "last_publish": 0, "turn": 0,
+    return {"seen": [], "queue": [], "hold": [], "last_publish": 0, "turn": 0,
             "published": {}, "failed": {}}
 
 def save(st):
     json.dump(st, open(STATE, "w", encoding="utf-8"), ensure_ascii=False)
 
-def pick_and_post(sess, st):
-    for _ in range(3):
+def next_candidate(sess, st, tries=3):
+    """անհատները՝ առաջինը․ գործակալականները գնում են պահոց"""
+    for _ in range(tries):
         if not st["queue"]:
-            return False
-        it = st["queue"].pop(0)
-        d = item_data(sess, it["url"])
-        if d is None or is_empty(d):
-            print("  բաց թողնվեց (դատարկ էջ)՝", it["key"])
-            continue
-        cap = make_caption(sess, d)
-        if cap and send(sess, d, cap):
-            st["published"][it["key"]] = time.time()
-            print("հրապարակվեց՝", it["key"])
-            return True
-    return False
-
-def main():
-    st = load()
-    for k, v in (("seen", []), ("queue", []), ("published", {}), ("failed", {}), ("turn", 0)):
-        st.setdefault(k, v)
-    st.setdefault("last_publish", 0)
-    sess = requests.Session()
-    now = time.time()
-
-    found = collect(sess, st)
-    while len(st["queue"]) > QUEUE_MAX:
-        st["queue"].pop(0)
-    print("հերթում՝", len(st["queue"]))
-
-    if TEST:
-        if pick_and_post(sess, st):
-            st["last_publish"] = now
-        save(st)
-        return
-
-    if st["queue"] and now - st["last_publish"] >= INTERVAL:
+            break
         want = ORDER[st["turn"] % len(ORDER)]
         idx = next((k for k, it in enumerate(st["queue"]) if it["src"] == want), 0)
         it = st["queue"].pop(idx)
         d = item_data(sess, it["url"])
         if d is None or is_empty(d):
-            print("  ԽՆԴԻՐ", it["src"], "՝ էջը չի բացվում՝", it["url"])
+            print("  բաց թողնվեց (դատարկ էջ)՝", it["key"])
             st["failed"][it["key"]] = st["failed"].get(it["key"], 0) + 1
             if st["failed"][it["key"]] < 3:
                 st["queue"].append(it)
-        else:
-            cap = make_caption(sess, d)
-            if cap and send(sess, d, cap):
-                st["last_publish"] = now
-                st["turn"] = (st["turn"] + 1) % len(ORDER)
-                st["published"][it["key"]] = now
-                print("հրապարակվեց՝", it["key"])
-            else:
-                st["failed"][it["key"]] = st["failed"].get(it["key"], 0) + 1
-                if st["failed"][it["key"]] < 3:
-                    st["queue"].append(it)
-
-    if len(st["published"]) > 50000:
-        keys = list(st["published"])[-20000:]
-        st["published"] = {k: st["published"][k] for k in keys}
-    save(st)
-
-main()
+            continue
+        if d["who"] == "agency":
+            print("  գործակալություն → պահոց՝", it["key"])
+            st["hold"].append(it)
+            continue
