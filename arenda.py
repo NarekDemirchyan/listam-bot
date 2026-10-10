@@ -1,34 +1,50 @@
 # -*- coding: utf-8 -*-
 # arenda.py — վարձույթի բոտ (@Marketplace_arm_bot → @arenda_armenia_arm)
-import os
-import re
-import json
-import time
-import requests
-
+import os, re, json, time, requests
 from fetcher import jina
 
-TOKEN   = os.environ.get("TELEGRAM_TOKEN", "")
-CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID_ARENDA", "")
+TOKEN    = os.environ.get("TELEGRAM_TOKEN", "")
+CHAT_ID  = os.environ.get("TELEGRAM_CHAT_ID_ARENDA", "")
+JINA_KEY = os.environ.get("JINA_KEY", "")
 
 STATE     = "state-arenda.json"
-INTERVAL  = 15 * 60     # 15 րոպե հրապարակումների միջև
+INTERVAL  = 15 * 60
 QUEUE_MAX = 250
-TEST      = True        # True՝ մեկ ստուգող հրապարակում ու դադար
+TEST      = True
 
-LIST_CATS   = ["56"]                                        # list.am՝ երկարաժամկետ վարձույթ
+LIST_CATS   = ["56"]
 ESTATE_LIST = ["https://www.estate.am/ru/аренда-квартир-s4"]
 MY_LIST     = ["https://myrealty.am/ru", "https://myrealty.am/ru?page=2"]
-
 ORDER = ["list", "list", "list", "estate", "list", "list", "list", "myrealty"]
 
 ITEM_RE   = re.compile(r"/ru/item/(\d+)")
 ESTATE_RE = re.compile(r"https://www\.estate\.am/ru/[^\s\)\]\"']+-d(\d+)")
 MY_RE     = re.compile(r"https://myrealty\.am/ru/snyat-kvartiru/[^\s\)\]\"']+/(\d+)")
-PHOTO_RE  = re.compile(r"(?:https?:)?//[^\s\)\]\"']+\.(?:jpg|jpeg|png|webp)", re.I)
-PRICE_RE  = re.compile(r"([\d][\d\s.,]{2,})\s*(֏|AMD|драм|\$|USD|€|EUR)", re.I)
+PHOTO_RE  = re.compile(r"(?:https?:)?//(?:img\.list\.am/[a-z]+/\d+/[0-9a-f]+|pic\.estate\.am/[^\s\)\]\"']+|myrealty\.am/images/[0-9a-f]{2}/[0-9a-f]{2}/[^\s\)\]\"']+)\.(?:jpg|jpeg|png|webp)", re.I)
+PRICE_RE  = re.compile(r"([\d][\d\s.,]{2,})\s*(֏|AMD|драм|\$|USD|€|EUR|Месяц|ամիս)", re.I)
 TEL_RE    = re.compile(r"tel:([+\d][\d\s\-\(\)]{6,})")
-BAD_IMG   = ("logo", "favicon", "icon", "sprite", "no-img", "avatar")
+TITLE_RE  = re.compile(r"((?:Снять|Аренда|Сдается|Сдаётся|Վարձով)[^\n]{5,140}квартир[^\n]{0,90})")
+AREA_RE   = re.compile(r"(\d{2,4})\s*(?:Кв\.?\s*м|քմ|ք\.մ)")
+FLOOR_RE  = re.compile(r"(\d{1,3})\s*/\s*(\d{1,3})\s*(?:Этаж|этаж|հարկ)")
+GENERIC   = ("КВАРТИРЫ", "ОСОБНЯКИ", "ДОМА", "АРЕНДА", "ОФИСЫ", "ПРОДАЖА", "НОВОСТРОЙКИ")
+
+def fetch(sess, url, extra=None):
+    md = jina(sess, url, extra) or ""
+    if len(md) > 800:
+        return md
+    if JINA_KEY:
+        try:
+            r = sess.get("https://r.jina.ai/" + url, timeout=60,
+                         headers={"Authorization": "Bearer " + JINA_KEY,
+                                  "User-Agent": "curl/8.5.0"})
+            t = r.text or ""
+            if r.status_code == 200 and len(t) > 800 and "just a moment" not in t.lower():
+                print("  jina-ընթերցիչ՝", len(t), url[:70])
+                return t
+            print("  jina-ընթերցիչ ձախողվեց՝", r.status_code, len(t))
+        except Exception as e:
+            print("  jina սխալ՝", type(e).__name__)
+    return md
 
 def esc(s):
     return (s or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
@@ -41,6 +57,10 @@ def latin_junk(t):
     if not t or has_cyr(t):
         return False
     return len(t.split()) > 2
+
+def is_generic(t):
+    t = (t or "").strip()
+    return (not t) or (t.upper() in GENERIC) or (t.isupper() and len(t.split()) <= 2)
 
 def translate(sess, text):
     text = (text or "").strip()
@@ -63,13 +83,13 @@ def collect_photos(*texts):
         for u in PHOTO_RE.findall(t or ""):
             if u.startswith("//"):
                 u = "https:" + u
-            if any(b in u.lower() for b in BAD_IMG):
-                continue
+            u = re.sub(r"_\d+x\d+(?=\.(?:jpe?g|png|webp)$)", "", u)
             if u not in out:
                 out.append(u)
     return out[:10]
 
-def add(st, src, key, url):
+def add(st, src, key, url, found):
+    found.append((src, key, url))
     if key in st["seen"]:
         return 0
     st["seen"].append(key)
@@ -77,76 +97,102 @@ def add(st, src, key, url):
     return 1
 
 def collect(sess, st):
+    found = []
     for cat in LIST_CATS:
-        md = jina(sess, "https://www.list.am/ru/category/" + cat) or ""
+        md = fetch(sess, "https://www.list.am/ru/category/" + cat)
         ids = []
         for i in ITEM_RE.findall(md):
             if i not in ids:
                 ids.append(i)
         n = sum(add(st, "list", "list:" + i,
-                    "https://www.list.am/ru/item/" + i) for i in ids)
+                    "https://www.list.am/ru/item/" + i, found) for i in ids)
         print(f"list.am {cat}: գտնվեց {len(ids)}, նոր՝ {n}")
         time.sleep(8)
-
     for page in ESTATE_LIST:
-        md = jina(sess, page) or ""
+        md = fetch(sess, page)
         items = {}
         for m in ESTATE_RE.finditer(md):
             items[m.group(1)] = m.group(0)
-        n = sum(add(st, "estate", "estate:" + i, u) for i, u in items.items())
+        n = sum(add(st, "estate", "estate:" + i, u, found) for i, u in items.items())
         print(f"estate.am: գտնվեց {len(items)}, նոր՝ {n}")
         time.sleep(8)
-
     for page in MY_LIST:
-        md = jina(sess, page) or ""
+        md = fetch(sess, page)
         items = {}
         for m in MY_RE.finditer(md):
             items[m.group(1)] = m.group(0)
-        n = sum(add(st, "myrealty", "my:" + i, u) for i, u in items.items())
+        n = sum(add(st, "myrealty", "my:" + i, u, found) for i, u in items.items())
         print(f"myrealty.am {page}: գտնվեց {len(items)}, նոր՝ {n}")
         time.sleep(8)
+    return found
 
 def item_data(sess, url):
-    md = jina(sess, url) or ""
+    md = fetch(sess, url)
     for cut in ("Похожие объявления", "Похожие"):
         i = md.find(cut)
         if i > 0:
             md = md[:i]
-
     photo_list = collect_photos(md)
     html = ""
     if not photo_list:
-        html = jina(sess, url, {"x-respond-with": "html"}) or ""
+        html = fetch(sess, url, {"x-respond-with": "html"})
         photo_list = collect_photos(html)
+
+    place = ""
+    m = re.search(r"\[([^\]]*›[^\]]*)\]", md)
+    if m:
+        place = m.group(1).strip()
+    if not place:
+        for line in md.split("\n"):
+            line = line.strip().lstrip("#* ").strip()
+            if "Ереван" in line and "," in line and 5 < len(line) < 90 and "http" not in line:
+                place = line
+                break
 
     title = ""
     m = re.search(r"^#\s+(.+)$", md, re.M)
     if m:
         title = m.group(1).strip()
+    if is_generic(title):
+        m = TITLE_RE.search(md)
+        if m:
+            title = m.group(1).strip()
+    if is_generic(title):
+        rooms = re.search(r"/(\d+)-komnatnaya/", url)
+        base = "Аренда"
+        if rooms:
+            base += " " + rooms.group(1) + "-комнатной квартиры"
+        if place:
+            base += ", " + place
+        title = base
+
+    feats = []
+    m = AREA_RE.search(md)
+    if m:
+        feats.append(m.group(1) + " кв.м")
+    m = FLOOR_RE.search(md)
+    if m:
+        feats.append("этаж " + m.group(1) + "/" + m.group(2))
 
     price = ""
     m = PRICE_RE.search(md)
     if m:
-        price = (m.group(1).strip() + " " + m.group(2)).strip()
+        num, cur = m.group(1).strip(), m.group(2)
+        price = (num + " $/мес") if cur.lower() in ("месяц", "ամիս") else (num + " " + cur).strip()
 
     desc = ""
     m = re.search(r"Описание\s*\n+(.+?)\n\s*(?:Номер объявления|Похожие|Пожаловаться)", md, re.S)
     if m:
         desc = " ".join(m.group(1).split())
 
-    place = ""
-    m = re.search(r"\[([^\]]*›[^\]]*)\]", md)
-    if m:
-        place = m.group(1).strip()
-
     phone = ""
     m = TEL_RE.search(md + "\n" + html)
     if m:
         phone = " ".join(m.group(1).split())
 
-    print(f"  {url}\n    md {len(md)}, նկար {len(photo_list)}, գին {price!r}, հեռ {bool(phone)}")
+    print(f"  {url}\n    md {len(md)}, նկար {len(photo_list)}, վերնագիր {title!r}, գին {price!r}, {feats}")
     return {"title": title, "price": price, "desc": desc, "place": place,
-            "phone": phone, "photos": photo_list, "url": url}
+            "feats": feats, "phone": phone, "photos": photo_list, "url": url}
 
 def make_caption(sess, d):
     head = translate(sess, d["title"]).strip()
@@ -158,7 +204,9 @@ def make_caption(sess, d):
     lines = ["<b>" + esc(head) + "</b>", "Аренда | Ереван и области"]
     if d["price"]:
         lines.append("<b>" + esc(d["price"]) + "</b>")
-    if d["place"]:
+    if d["feats"]:
+        lines.append(" · ".join(esc(x) for x in d["feats"]))
+    if d["place"] and d["place"] not in head:
         lines.append(esc(d["place"]))
     if d["desc"]:
         lines.append(esc(translate(sess, d["desc"][:600])))
@@ -169,7 +217,6 @@ def make_caption(sess, d):
 def send(sess, d, caption):
     markup = {"inline_keyboard": [[{"text": "Связаться", "url": d["url"]}]]}
     photo_list = d["photos"]
-
     if len(photo_list) >= 2:
         media = [{"type": "photo", "media": photo_list[0], "caption": caption,
                   "parse_mode": "HTML"}]
@@ -177,8 +224,7 @@ def send(sess, d, caption):
             media.append({"type": "photo", "media": p})
         r = sess.post(f"https://api.telegram.org/bot{TOKEN}/sendMediaGroup",
                       data={"chat_id": CHAT_ID,
-                            "media": json.dumps(media, ensure_ascii=False)},
-                      timeout=60)
+                            "media": json.dumps(media, ensure_ascii=False)}, timeout=60)
         print("ալբոմ՝", r.status_code, r.text[:200])
         if not r.ok:
             r1 = sess.post(f"https://api.telegram.org/bot{TOKEN}/sendPhoto",
@@ -202,7 +248,6 @@ def send(sess, d, caption):
                        data=payload, timeout=40)
         print("կոճակ՝", r2.status_code, r2.text[:200])
         return r.ok
-
     payload = {"chat_id": CHAT_ID, "parse_mode": "HTML",
                "reply_markup": json.dumps(markup)}
     if photo_list:
@@ -212,8 +257,7 @@ def send(sess, d, caption):
     else:
         payload["text"] = caption
         method = "sendMessage"
-    r = sess.post(f"https://api.telegram.org/bot{TOKEN}/{method}",
-                  data=payload, timeout=40)
+    r = sess.post(f"https://api.telegram.org/bot{TOKEN}/{method}", data=payload, timeout=40)
     print("ուղարկում՝", r.status_code, r.text[:300])
     return r.ok
 
@@ -228,26 +272,28 @@ def save(st):
 
 def main():
     st = load()
-    for k, v in (("seen", []), ("queue", []), ("published", {}),
-                 ("failed", {}), ("turn", 0)):
+    for k, v in (("seen", []), ("queue", []), ("published", {}), ("failed", {}), ("turn", 0)):
         st.setdefault(k, v)
     st.setdefault("last_publish", 0)
     sess = requests.Session()
     now = time.time()
 
-    collect(sess, st)
+    found = collect(sess, st)
     while len(st["queue"]) > QUEUE_MAX:
         st["queue"].pop(0)
     print("հերթում՝", len(st["queue"]))
 
     if TEST:
-        if st["queue"]:
-            it = st["queue"].pop(0)
-            d = item_data(sess, it["url"])
+        pick = st["queue"].pop(0) if st["queue"] else None
+        if pick is None and found:
+            s, k, u = found[0]
+            pick = {"src": s, "key": k, "url": u}
+        if pick:
+            d = item_data(sess, pick["url"])
             cap = make_caption(sess, d)
             print("caption՝", cap[:300])
             if send(sess, d, cap):
-                st["published"][it["key"]] = now
+                st["published"][pick["key"]] = now
                 st["last_publish"] = now
         save(st)
         return
@@ -257,8 +303,7 @@ def main():
         for _ in range(3):
             if not st["queue"]:
                 break
-            idx = next((k for k, it in enumerate(st["queue"])
-                        if it["src"] == want), 0)
+            idx = next((k for k, it in enumerate(st["queue"]) if it["src"] == want), 0)
             it = st["queue"].pop(idx)
             ok = False
             try:
@@ -283,7 +328,6 @@ def main():
     if len(st["published"]) > 50000:
         keys = list(st["published"])[-20000:]
         st["published"] = {k: st["published"][k] for k in keys}
-
     save(st)
 
 main()
