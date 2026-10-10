@@ -10,7 +10,7 @@ CHAT_ID  = os.environ.get("TELEGRAM_CHAT_ID", "")
 JINA_KEY = os.environ.get("JINA_KEY", "")
 
 STATE      = "state.json"
-INTERVAL = 10 * 60      # минимальный промежуток между публикациями (сек)
+INTERVAL = 10 * 60
 QUEUE_MAX  = 250          # максимум объявлений в очереди
 RESET_ONCE = True         # однократный сброс очереди, сработает один раз
 RESET_SEED = 40           # сколько свежих объявлений взять из каждого раздела
