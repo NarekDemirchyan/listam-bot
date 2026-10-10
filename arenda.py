@@ -9,7 +9,7 @@ JINA_KEY = os.environ.get("JINA_KEY", "")
 
 STATE      = "state-arenda.json"
 INTERVAL = 7 * 60
-QUEUE_MAX  = 250
+QUEUE_MAX = 500
 HOLD_MAX   = 400
 TEST       = False
 
