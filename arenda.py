@@ -605,3 +605,60 @@ def next_candidate(sess, st, tries=3):
             print("  գործակալություն → պահոց՝", it["key"])
             st["hold"].append(it)
             continue
+return it, d
+    while st["hold"]:
+        it = st["hold"].pop(0)
+        d = item_data(sess, it["url"])
+        if d is None or is_empty(d):
+            print("  բաց թողնվեց (դատարկ էջ)՝", it["key"])
+            continue
+        return it, d
+    return None, None
+
+def publish(sess, st, it, d, now):
+    cap = make_caption(sess, d)
+    if cap and send(sess, d, cap):
+        st["last_publish"] = now
+        st["turn"] = (st["turn"] + 1) % len(ORDER)
+        st["published"][it["key"]] = now
+        print("հրապարակվեց՝", it["key"])
+        return True
+    st["failed"][it["key"]] = st["failed"].get(it["key"], 0) + 1
+    if st["failed"][it["key"]] < 3:
+        st["queue"].append(it)
+    return False
+
+def main():
+    st = load()
+    for k, v in (("seen", []), ("queue", []), ("hold", []), ("published", {}),
+                 ("failed", {}), ("turn", 0)):
+        st.setdefault(k, v)
+    st.setdefault("last_publish", 0)
+    sess = requests.Session()
+    now = time.time()
+
+    found = collect(sess, st)
+    while len(st["queue"]) > QUEUE_MAX:
+        st["queue"].pop(0)
+    while len(st["hold"]) > HOLD_MAX:
+        st["hold"].pop(0)
+    print("հերթում՝", len(st["queue"]), "| պահոցում՝", len(st["hold"]))
+
+    if TEST:
+        it, d = next_candidate(sess, st)
+        if it and d:
+            publish(sess, st, it, d, now)
+        save(st)
+        return
+
+    if now - st["last_publish"] >= INTERVAL and (st["queue"] or st["hold"]):
+        it, d = next_candidate(sess, st)
+        if it and d:
+            publish(sess, st, it, d, now)
+
+    if len(st["published"]) > 50000:
+        keys = list(st["published"])[-20000:]
+        st["published"] = {k: st["published"][k] for k in keys}
+    save(st)
+
+main()
