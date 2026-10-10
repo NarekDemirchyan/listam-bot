@@ -30,6 +30,7 @@ MY_RE     = re.compile(r"https://myrealty\.am/ru/snyat-kvartiru/[^\s\)\]\"']+/(\
 PHOTO_RE  = re.compile(r"(?:https?:)?//(?:img\.list\.am/[^\s\)\]\"']+|pic\.estate\.am/[^\s\)\]\"']+|myrealty\.am/images/[0-9a-f]{2}/[0-9a-f]{2}/[^\s\)\]\"']+)\.(?:jpg|jpeg|png|webp)", re.I)
 PRICE_RE  = re.compile(r"([\d][\d\s.,]{2,})\s*(֏|AMD|драм|\$|USD|€|EUR|Месяц|ամիս)", re.I)
 TEL_RE    = re.compile(r"tel:([+\d][\d\s\-\(\)]{6,})")
+PHONE_TEXT_RE = re.compile(r"(?<![\d,])(?:\+?374[\s\-\(\)]?\d{2}[\s\-]?\d{3}[\s\-]?\d{3}|0\d{2}[\s\-]?\d{3}[\s\-]?\d{3})(?![\d])")
 OG_RE     = re.compile(r'<meta[^>]+(?:property|name)=["\']og:(title|description)["\'][^>]*content=["\']([^"\']*)', re.I)
 TITLE_RE  = re.compile(r"((?:Снять|Аренда|Сдается|Сдаётся|Վարձով)[^\n]{5,140}квартир[^\n]{0,90})")
 AREA_RE   = re.compile(r"(\d{2,4})\s*(?:Кв\.?\s*м|քմ|ք\.մ)", re.I)
@@ -127,9 +128,22 @@ def fmt_phone(p):
     d = re.sub(r"\D", "", p or "")
     if d.startswith("374") and len(d) == 11:
         return "+374 " + d[3:5] + " " + d[5:8] + " " + d[8:]
+    if len(d) == 9 and d.startswith("0"):
+        return "+374 " + d[1:3] + " " + d[3:6] + " " + d[6:]
     if len(d) == 8:
         return "+374 " + d[0:2] + " " + d[2:5] + " " + d[5:]
     return (p or "").strip()
+
+def find_phone(*texts):
+    for t in texts:
+        m = TEL_RE.search(t or "")
+        if m:
+            return fmt_phone(m.group(1))
+    for t in texts:
+        m = PHONE_TEXT_RE.search(t or "")
+        if m:
+            return fmt_phone(m.group(0))
+    return ""
 
 def low1(s):
     s = (s or "").strip()
@@ -390,13 +404,10 @@ def item_data(sess, url):
     if desc and similar(desc, title):
         desc = ""
 
-    phone = ""
-    m = TEL_RE.search(md + "\n" + html)
-    if m:
-        phone = fmt_phone(" ".join(m.group(1).split()))
+    phone = find_phone(md, md_cut, html)
 
     print(f"  {url}\n    md {len(md)}, html {len(html)}, նկար {len(photo_list)}, վերնագիր {title!r}, "
-          f"գին {price!r}, քարտ {vals}, հեռախոս {'այո' if phone else 'ոչ'}, նկարագրություն {len(desc)}")
+          f"գին {price!r}, քարտ {vals}, հեռախոս {phone or 'ոչ'}, նկարագրություն {len(desc)}")
     return {"title": title, "price": price, "desc": desc, "place": place,
             "specs": vals, "phone": phone, "photos": photo_list, "url": url}
 
