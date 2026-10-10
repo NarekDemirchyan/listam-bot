@@ -39,6 +39,7 @@ BAD_DESC  = re.compile(r"breadcrumb|chevron|\.svg|!\[|\]\(|https?://", re.I)
 HOURS_RE  = re.compile(r"(?:Пн|Вт|Ср|Чт|Пт|Сб|Вс|Понедельник|Вторник|Среда|Четверг|Пятница|Суббота|Воскресенье)"
                        r"[^\nА-Яа-я]{0,12}\d{1,2}[:.]\d{2}\s*[-–—]\s*\d{1,2}[:.]\d{2}", re.I)
 WORK_RE   = re.compile(r"(?:График работы|Часы работы|Рабочие часы)[^\n]{0,80}", re.I)
+TAIL_RE   = re.compile(r"\s*(?:Похожие|Նման|Similar|Пожаловаться|Выберите ваш язык)[^\n]*$", re.I)
 ZALOG_RE  = r"Предоплата\s*\n+\s*(1 месяц|2 месяца|3 месяца|\d+\s*месяц(?:а|ев)?|1 ամիս|2 ամիս|[Бб]ез предоплаты)"
 LABELS    = ("Общая площадь", "Жилая площадь", "Площадь кухни", "Площадь", "Высота потолков",
              "Высота потолка", "Этажей в доме", "Этажность", "Этаж", "Количество комнат",
@@ -89,10 +90,16 @@ def html_to_text(h):
     h = re.sub(r"(?is)<(script|style|noscript)[^>]*>.*?</\1>", " ", h or "")
     h = re.sub(r"(?is)<br\s*/?>|</(?:p|div|li|tr|h\d|span|td)>", "\n", h)
     h = re.sub(r"(?s)<[^>]+>", " ", h)
-    for a, b in (("&nbsp;", " "), ("&amp;", "&"), ("&#039;", "'"), ("&quot;", '"'), ("&laquo;", "«"), ("&raquo;", "»")):
+    for a, b in (("&nbsp;", " "), ("&amp;", "&"), ("&#039;", "'"), ("&quot;", '"'),
+                 ("&laquo;", "«"), ("&raquo;", "»")):
         h = h.replace(a, b)
     h = re.sub(r"[ \t]+", " ", h)
     return re.sub(r"\n{2,}", "\n", h).strip()
+
+def clean_place(p):
+    p = TAIL_RE.sub("", p or "")
+    p = re.sub(r"\s*объяв\w*$", "", p, flags=re.I)
+    return " ".join(p.split()).strip(" ,|-–—")
 
 def esc(s):
     return (s or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
@@ -251,8 +258,8 @@ def spec_pairs(md):
     grab("комиссия", r"([\d.,]+\s*%)\s*\n+\s*Комиссия с арендатора")
     grab("статус", r"(Свободно сейчас|Сдано|Забронировано)\s*\n+\s*Статус доступности")
     grab("мебель", r"Мебель\s*\n+\s*(С мебелью|Без мебели|Частично)")
-    grab("состояние", r"Ремонт\s*\n+\s*(Евроремонт|Новый ремонт|Капитальный ремонт|Косметический ремонт|Без ремонта|Дизайнерский)")
-    grab("балкон", r"Балкон\s*\n+\s*(Открытый|Закрытый|Есть|Нет)")
+    grab("состояние", r"Ремонт\s*\n+\s*(Евроремонт|Новый ремонт|Капитальный ремонт|Косметический ремонт|Без ремонта|Дизайнерский|Частичный)")
+    grab("балкон", r"Балкон\s*\n+\s*(Открытый|Закрытый|Есть|Нет|Без)")
     grab("тип", r"Тип (?:здания|постройки)\s*\n+\s*(.{2,30})")
     grab("район", r"Регион\s*\n+\s*(.{2,45})")
     grab("отопление", r"Отопление\s*\n+\s*(.{2,30})")
@@ -360,15 +367,16 @@ def item_data(sess, url):
     photo_list = collect_photos(md_cut, html)
 
     place = ""
-    m = re.search(r"\[([^\]]*›[^\]]*)\]", md)
+    m = re.search(r"\[([^\]]*›[^\]]*)\]", md_cut)
     if m:
         place = m.group(1).strip()
     if not place:
-        for line in md.split("\n"):
+        for line in md_cut.split("\n"):
             line = line.strip().lstrip("#* ").strip()
             if "Ереван" in line and "," in line and 5 < len(line) < 90 and "http" not in line:
                 place = line
                 break
+    place = clean_place(place)
 
     title = ""
     m = re.search(r"^#\s+(.+)$", md, re.M)
@@ -387,6 +395,11 @@ def item_data(sess, url):
 
     specs, keys = [], set()
     def add_spec(k, val):
+        val = " ".join((val or "").split())
+        if k == "комиссия" and "%" not in val:
+            return
+        if k == "залог" and not re.search(r"месяц|ամիս|договор|Без предоплаты", val, re.I):
+            return
         if k not in keys and k in NAMES and val:
             keys.add(k)
             specs.append((k, val))
@@ -402,7 +415,7 @@ def item_data(sess, url):
         add_spec(k, val)
     vals = dict(specs)
     if not place and vals.get("район"):
-        place = vals.pop("район")
+        place = clean_place(vals.pop("район"))
 
     price = ""
     m = PRICE_RE.search(md)
@@ -477,17 +490,24 @@ def make_caption(sess, d):
         cap += "\n\n" + tail
     return cap[:1024]
 
+def button_message(sess, markup, reply_to=None):
+    payload = {"chat_id": CHAT_ID, "text": "Открыть объявление",
+               "reply_markup": json.dumps(markup)}
+    if reply_to:
+        payload["reply_parameters"] = json.dumps({"message_id": reply_to})
+    r = sess.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage",
+                  data=payload, timeout=40)
+    print("կոճակ՝", r.status_code, r.text[:200])
+    return r.ok
+
 def send(sess, d, caption):
     photo_list = d["photos"]
     markup = None
     if not d["phone"]:
         markup = {"inline_keyboard": [[{"text": "Открыть объявление", "url": d["url"]}]]}
     if len(photo_list) >= 2:
-        first = {"type": "photo", "media": photo_list[0],
-                 "caption": caption, "parse_mode": "HTML"}
-        if markup:
-            first["reply_markup"] = markup
-        media = [first]
+        media = [{"type": "photo", "media": photo_list[0],
+                  "caption": caption, "parse_mode": "HTML"}]
         for p in photo_list[1:10]:
             media.append({"type": "photo", "media": p})
         r = sess.post(f"https://api.telegram.org/bot{TOKEN}/sendMediaGroup",
@@ -503,6 +523,15 @@ def send(sess, d, caption):
                            data=payload, timeout=40)
             print("մեկ նկարով՝", r1.status_code, r1.text[:200])
             return r1.ok
+        if markup:
+            mid = None
+            try:
+                res = r.json().get("result") or []
+                if res:
+                    mid = res[0].get("message_id")
+            except Exception:
+                mid = None
+            button_message(sess, markup, mid)
         return r.ok
     payload = {"chat_id": CHAT_ID, "parse_mode": "HTML"}
     if markup:
@@ -528,12 +557,10 @@ def save(st):
     json.dump(st, open(STATE, "w", encoding="utf-8"), ensure_ascii=False)
 
 def pick_and_post(sess, st):
-    """Վերցնում է հերթից, փորձում մինչև 3 հայտարարություն։ Վերադարձնում է (ok, src)։"""
     for _ in range(3):
         if not st["queue"]:
-            return False, ""
+            return False
         it = st["queue"].pop(0)
-        src = it["src"]
         d = item_data(sess, it["url"])
         if d is None or is_empty(d):
             print("  բաց թողնվեց (դատարկ էջ)՝", it["key"])
@@ -542,9 +569,8 @@ def pick_and_post(sess, st):
         if cap and send(sess, d, cap):
             st["published"][it["key"]] = time.time()
             print("հրապարակվեց՝", it["key"])
-            return True, src
-        continue
-    return False, ""
+            return True
+    return False
 
 def main():
     st = load()
@@ -560,7 +586,7 @@ def main():
     print("հերթում՝", len(st["queue"]))
 
     if TEST:
-        if pick_and_post(sess, st)[0]:
+        if pick_and_post(sess, st):
             st["last_publish"] = now
         save(st)
         return
